@@ -1,0 +1,80 @@
+HARP PROJECT
+
+Copyright 2014 Inidana University
+Apache License 2.0
+
+WHAT IS HARP?
+Harp is a collective communication libaray which can be plugged 
+into Hadoop (tested on version 1.2.1 & version 2.2.0).
+With this plug-in, Map-Reduce jobs can be transformed to Map-Collective jobs 
+and user can invoke efficient in-memory collective communication directly in Map tasks.
+
+FEATURES
+1. Hadoop plugin 
+2. Hierarchal data abstraction which supports different abstractions on arrays, key-values and graphs
+3. Collective communication model which supports different operations such as broadcast, allgather,allreduce.
+4. Resource pool based Memory management
+5. BSP style computation parallelism with multi-thread support
+6. Fault tolerance with check-pointing relying on HDFS
+
+APPLICATIONS
+K-means Clustering
+Multi-dimensional Scaling
+Page-rank
+Fruchterman–Reingold graph layout
+
+COMPILATION & INSTALLATION
+hadoop-1.2.1
+1. Enter "harp" home directory and execute "ant"
+2. Copy harp-0.1.0-hadoop-1.2.1.jar and fastutil-6.5.7.jar from lib/ into hadoop-1.2.1/lib.
+3. Configure Hadoop environment for settings required to run Hadoop.
+4. Edit mapred-site.xml in hadoop-1.2.1/conf, add the following properties to configure Harp.
+   
+   <property>
+     <name>mapred.jobtracker.taskScheduler</name>
+     <value>org.apache.hadoop.mapred.MapCollectiveScheduler</value>
+   </property>
+   <property>
+     <name>mapred.tasktracker.map.tasks.maximum</name>
+     <value>1</value>
+     </description>
+   </property>
+   <property>
+     <name>mapred.map.child.java.opts</name>
+     <value>-Xmx1200m</value>
+   </property>
+    
+   The first property is necessary for using Harp collective communication.
+   The second and third are used to limit the number of workers per node and to use multi-thread mode.
+
+5. Enter "harp-app" home directory and execute "ant" 
+6. Copy build/harp-app-hadoop-1.2.1.jar to hadoop-1.2.1/.
+7. Start Hadoop environment.
+8. Run Kmeans job 
+   bin/hadoop jar harp-app-hadoop-1.2.1.jar edu.iu.kmeans.KMeansMapReduce <num Of DataPoints> <num of Centroids> <vector size>
+          <number of map tasks> <partition per worker> <number of iteration> <iteration per job> <start Job ID> <work dir> <local points dir>
+
+hadoop-2.2.0
+1. Enter "harp" home directory and execute "ant yarndist"
+2. Copy harp-0.1.0-hadoop-2.2.0.jar and fastutil-6.5.7.jar from lib/ into hadoop-2.2.0/share/hadoop/mapreduce.
+3. Configure Hadoop environment for settings required to run Hadoop.
+4. Edit mapred-site.xml in hadoop-2.2.0/etc/hadoop, add memory settings for map tasks in map-collecitve jobs
+   (you can change to other numbers you want).
+   
+  <property>
+    <name>mapreduce.map.collective.memory.mb</name>
+    <value>9000</value>
+  </property>
+  <property>
+    <name>mapreduce.map.collective.java.memory.mb</name>
+    <value>8000</value>
+  </property>
+
+5. for harp applications development in hadoop-2.2.0, remember to add the following property in job configuration:
+   jobConf.set("mapreduce.framework.name", "map-collective");
+6. Enter "harp-app" home directory and execute "ant yarncompile" 
+7. Copy build/harp-app-hadoop-2.2.0.jar to hadoop-2.2.0/.
+8. Start Hadoop environment.
+9. Run Kmeans job 
+   bin/hadoop jar harp-app-hadoop-1.2.1.jar edu.iu.kmeans.KMeansMapReduce <num Of DataPoints> <num of Centroids> <vector size>
+          <number of map tasks> <partition per worker> <number of iteration> <iteration per job> <start Job ID> <work dir> <local points dir>

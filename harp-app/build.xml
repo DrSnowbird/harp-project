@@ -1,0 +1,61 @@
+<project name="Harp-App" basedir="." default="compile">
+  <property name="build" location="build"/>
+  <property name="lib" location="lib"/>
+  <property name="env.HADOOP_HOME" value="/home/zhangbj/hadoop-1.2.1"/>
+  <property name="env.YARN_HOME" value="/home/zhangbj/hadoop-2.2.0"/>
+
+  <path id="class.path">
+    <fileset dir="lib">
+      <include name="**/*.jar" />
+    </fileset>
+    <fileset dir="${env.HADOOP_HOME}/lib">
+      <include name="**/*.jar" />
+    </fileset>
+    <fileset dir="${env.HADOOP_HOME}">
+      <include name="hadoop-*.jar" />
+    </fileset>
+  </path>
+
+  <path id="yarn.class.path">
+    <fileset dir="lib">
+      <include name="**/*.jar" />
+    </fileset>
+    <fileset dir="${env.YARN_HOME}/share/hadoop/mapreduce">
+      <include name="**/*.jar" />
+    </fileset>
+    <fileset dir="${env.YARN_HOME}/share/hadoop/common">
+      <include name="**/*.jar" />
+      <include name="**/lib/*.jar" />
+    </fileset>
+  </path>
+
+  <target name="compile" depends="clean">
+    <mkdir dir="${build}/classes" />
+    <javac memoryMaximumSize="256m" memoryInitialSize="256m" fork="true" destdir="${build}/classes" debug="true" debuglevel="lines,vars,source">
+      <src path="src" />
+      <classpath refid="class.path"/>
+    </javac>
+    <copy todir="${build}/classes/lib">
+      <fileset dir="lib">
+      </fileset>
+    </copy>
+    <jar destfile="${build}/harp-app-hadoop-1.2.1.jar" basedir="${build}/classes"/>
+  </target>
+
+  <target name="clean">
+    <delete dir="build" />
+  </target>
+
+  <target name="yarncompile" depends="clean">
+    <mkdir dir="${build}/classes" />
+    <javac memoryMaximumSize="256m" memoryInitialSize="256m" fork="true" destdir="${build}/classes" debug="true" debuglevel="lines,vars,source">
+      <src path="src" />
+      <classpath refid="yarn.class.path" />
+    </javac>
+    <copy todir="${build}/classes/lib">
+      <fileset dir="lib">
+      </fileset>
+    </copy>
+    <jar destfile="${build}/harp-app-hadoop-2.2.0.jar" basedir="${build}/classes"/>
+  </target>
+</project>
