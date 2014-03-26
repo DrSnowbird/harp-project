@@ -76,5 +76,5 @@ hadoop-2.2.0
 7. Copy build/harp-app-hadoop-2.2.0.jar to hadoop-2.2.0/.
 8. Start Hadoop environment.
 9. Run Kmeans job 
-   bin/hadoop jar harp-app-hadoop-1.2.1.jar edu.iu.kmeans.KMeansMapReduce <num Of DataPoints> <num of Centroids> <vector size>
+   bin/hadoop jar harp-app-hadoop-2.2.0.jar edu.iu.kmeans.KmeansMapReduce <num Of DataPoints> <num of Centroids> <vector size>
           <number of map tasks> <partition per worker> <number of iteration> <iteration per job> <start Job ID> <work dir> <local points dir>
