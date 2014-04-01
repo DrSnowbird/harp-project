@@ -310,7 +310,7 @@ public class MapCollectiveContainerAllocator extends
       // Use original event to create a new event without host/rack locality
       // to make tasks no wait but start immediately
       String[] hs = { nodes[next] };
-      String[] rc = {"/default/rack"};
+      String[] rc = {"/default-rack"};
       ContainerRequestEvent reqEvent = new ContainerRequestEvent(
         event.getAttemptID(), ((ContainerRequestEvent) event).getCapability(),
         hs, rc);
