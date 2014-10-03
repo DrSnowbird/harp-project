@@ -38,16 +38,18 @@ public class DblArrParBcastMaster extends DblArrChainBcastMaster {
     Workers workers, ResourcePool pool) throws Exception {
     super(partition.getArray(), workers, pool);
     this.partitionID = partition.getPartitionID();
-    LOG.info("partitionID " + partitionID);
+    // LOG.info("partitionID " + partitionID);
     this.setCommand(Constants.BYTE_ARRAY_CHAIN_BCAST);
   }
 
   @Override
   protected Commutable processData(Commutable data) throws Exception {
     ByteArray array = (ByteArray) super.processData(data);
-    int[] metaData = new int[1];
-    metaData[0] = this.partitionID;
-    array.setMetaData(metaData);
+    // int[] metaData = new int[1];
+    int[] metaArray = this.getResourcePool().getIntArrayPool().getArray(1);
+    metaArray[0] = this.partitionID;
+    array.setMetaArray(metaArray);
+    array.setMetaArraySize(1);
     return array;
   }
 }

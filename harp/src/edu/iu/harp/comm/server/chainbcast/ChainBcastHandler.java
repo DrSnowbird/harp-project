@@ -58,9 +58,9 @@ public abstract class ChainBcastHandler implements Runnable {
         this.conn.close();
         return;
       }
-      LOG.info("Succeed to start next connection.");
+      // LOG.info("Succeed to start next connection.");
     } else {
-      LOG.info("No next connection.");
+      // LOG.info("No next connection.");
     }
     Commutable data = null;
     try {

@@ -38,16 +38,24 @@ public class StructObjReqHandler extends ByteArrReqHandler {
   }
 
   protected Commutable processByteArray(ByteArray byteArray) throws Exception {
-    StructObject obj = deserializeStructObjFromBytes(byteArray.getArray(),
-      byteArray.getSize(), this.getResourcePool());
-    // If success, release bytes
-    this.getResourcePool().getByteArrayPool()
-      .releaseArrayInUse(byteArray.getArray());
-    return obj;
+    byte[] bytes = byteArray.getArray();
+    if (bytes != null) {
+      StructObject obj = deserializeStructObjFromBytes(bytes,
+        byteArray.getSize(), this.getResourcePool());
+      // If success, release bytes
+      // Meta array doesn't exist in sending struct object
+      this.getResourcePool().getByteArrayPool().releaseArrayInUse(bytes);
+      return obj;
+    } else {
+      return null;
+    }
   }
 
   public static StructObject deserializeStructObjFromBytes(byte[] bytes,
     int size, ResourcePool resourcePool) throws Exception {
+    if (bytes == null || size == 0) {
+      return null;
+    }
     StructObject obj = null;
     DataInput din = new DataDeserializer(bytes);
     try {
@@ -55,7 +63,8 @@ public class StructObjReqHandler extends ByteArrReqHandler {
       obj = (StructObject) resourcePool.getWritableObjectPool()
         .getWritableObject(className);
       obj.read(din);
-      LOG.info("Class name: " + className + ", size: " + obj.getSizeInBytes());
+      // LOG.info("Class name: " + className + ", size: " +
+      // obj.getSizeInBytes());
     } catch (Exception e) {
       LOG.error("Error in deserialization...", e);
       // Free if error

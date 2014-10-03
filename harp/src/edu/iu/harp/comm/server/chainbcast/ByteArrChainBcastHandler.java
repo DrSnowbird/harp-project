@@ -16,9 +16,9 @@
 
 package edu.iu.harp.comm.server.chainbcast;
 
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 
 import org.apache.log4j.Logger;
 
@@ -28,6 +28,7 @@ import edu.iu.harp.comm.WorkerData;
 import edu.iu.harp.comm.Workers;
 import edu.iu.harp.comm.data.ByteArray;
 import edu.iu.harp.comm.data.Commutable;
+import edu.iu.harp.comm.resource.DataDeserializer;
 import edu.iu.harp.comm.resource.ResourcePool;
 
 public class ByteArrChainBcastHandler extends ChainBcastHandler {
@@ -42,13 +43,13 @@ public class ByteArrChainBcastHandler extends ChainBcastHandler {
 
   protected Commutable receiveData(Connection conn, Connection nextConn)
     throws Exception {
-    DataInputStream din = conn.getDataInputDtream();
-    DataOutputStream doutNextWorker = null;
+    InputStream in = conn.getInputDtream();
+    OutputStream outNextWorker = null;
     if (nextConn != null) {
-      doutNextWorker = nextConn.getDataOutputStream();
+      outNextWorker = nextConn.getOutputStream();
     }
     // Receive data
-    ByteArray byteArray = receiveByteArray(din, doutNextWorker);
+    ByteArray byteArray = receiveByteArray(in, outNextWorker);
     // Close connection
     conn.close();
     if (nextConn != null) {
@@ -60,6 +61,7 @@ public class ByteArrChainBcastHandler extends ChainBcastHandler {
       data = processByteArray(byteArray);
     } catch (Exception e) {
       releaseBytes(byteArray.getArray());
+      releaseInts(byteArray.getMetaArray());
       throw e;
     }
     return data;
@@ -69,63 +71,77 @@ public class ByteArrChainBcastHandler extends ChainBcastHandler {
    * Receive 1. command 2. byte array size 3. meta data size 4. meta data
    * content
    * 
-   * @param din
-   * @param doutNextWorker
+   * @param in
+   * @param outNextWorker
    * @return
    * @throws Exception
    */
-  private ByteArray receiveByteArray(DataInputStream din,
-    DataOutputStream doutNextWorker) throws Exception {
-    int size = din.readInt();
-    int metaDataSize = din.readInt();
-    int[] metaData = null;
-    if (doutNextWorker != null) {
-      doutNextWorker.writeByte(this.getCommand());
-      doutNextWorker.writeInt(size);
-      doutNextWorker.writeInt(metaDataSize);
-      doutNextWorker.flush();
+  private ByteArray receiveByteArray(InputStream in, OutputStream outNextWorker)
+    throws Exception {
+    // int size = din.readInt();
+    // int metaDataSize = din.readInt();
+    // Read byte array size and meta array size
+    byte[] sizeBytes = this.getResourcePool().getByteArrayPool().getArray(8);
+    in.read(sizeBytes);
+    // Forward
+    if (outNextWorker != null) {
+      outNextWorker.write(this.getCommand());
+      outNextWorker.write(sizeBytes);
     }
-    if (metaDataSize > 0) {
-      // LOG.info("Meta data size: " + metaDataSize);
-      metaData = new int[metaDataSize];
-      for (int i = 0; i < metaDataSize; i++) {
-        metaData[i] = din.readInt();
+    DataDeserializer deserializer = new DataDeserializer(sizeBytes);
+    int size = deserializer.readInt();
+    int metaArraySize = deserializer.readInt();
+    this.getResourcePool().getByteArrayPool().releaseArrayInUse(sizeBytes);
+    // Read meta array
+    int[] metaArray = null;
+    if (metaArraySize > 0) {
+      metaArray = this.getResourcePool().getIntArrayPool()
+        .getArray(metaArraySize);
+      byte[] metaArrayBytes = this.getResourcePool().getByteArrayPool()
+        .getArray(4 * metaArraySize);
+      in.read(metaArrayBytes);
+      // Forward
+      if (outNextWorker != null) {
+        outNextWorker.write(metaArrayBytes);
       }
-      if (doutNextWorker != null) {
-        for (int i = 0; i < metaDataSize; i++) {
-          doutNextWorker.writeInt(metaData[i]);
-        }
-        doutNextWorker.flush();
+      deserializer.setData(metaArrayBytes);
+      for (int i = 0; i < metaArraySize; i++) {
+        metaArray[i] = deserializer.readInt();
       }
+      this.getResourcePool().getByteArrayPool()
+        .releaseArrayInUse(metaArrayBytes);
+    }
+    if (outNextWorker != null) {
+      outNextWorker.flush();
     }
     // Prepare internal bytes structure
     byte[] bytes = this.getResourcePool().getByteArrayPool()
       .getArray(size + Constants.SENDRECV_BYTE_UNIT);
     try {
-      receiveBytes(din, doutNextWorker, bytes, size);
+      receiveBytes(in, outNextWorker, bytes, size);
     } catch (Exception e) {
       releaseBytes(bytes);
+      releaseInts(metaArray);
       throw e;
     }
     ByteArray byteArray = new ByteArray();
     byteArray.setArray(bytes);
     byteArray.setStart(0);
     byteArray.setSize(size);
-    byteArray.setMetaData(metaData);
-    LOG.info("Byte array size: " + size + ", real array size: " + bytes.length
-      + ", meta data size: " + metaDataSize);
+    byteArray.setMetaArray(metaArray);
+    byteArray.setMetaArraySize(metaArraySize);
     return byteArray;
   }
 
-  private void receiveBytes(DataInputStream din,
-    DataOutputStream doutNextWorker, byte[] bytes, int size) throws IOException {
+  private void receiveBytes(InputStream in, OutputStream outNextWorker,
+    byte[] bytes, int size) throws IOException {
     // Receive bytes data and process
     int recvLen = 0;
     int len = 0;
-    while ((len = din.read(bytes, recvLen, Constants.SENDRECV_BYTE_UNIT)) > 0) {
-      if (doutNextWorker != null) {
-        doutNextWorker.write(bytes, recvLen, len);
-        doutNextWorker.flush();
+    while ((len = in.read(bytes, recvLen, Constants.SENDRECV_BYTE_UNIT)) > 0) {
+      if (outNextWorker != null) {
+        outNextWorker.write(bytes, recvLen, len);
+        outNextWorker.flush();
       }
       recvLen = recvLen + len;
       if (recvLen == size) {
@@ -136,6 +152,10 @@ public class ByteArrChainBcastHandler extends ChainBcastHandler {
 
   private void releaseBytes(byte[] bytes) {
     this.getResourcePool().getByteArrayPool().releaseArrayInUse(bytes);
+  }
+
+  private void releaseInts(int[] ints) {
+    this.getResourcePool().getIntArrayPool().releaseArrayInUse(ints);
   }
 
   protected Commutable processByteArray(ByteArray array) throws Exception {

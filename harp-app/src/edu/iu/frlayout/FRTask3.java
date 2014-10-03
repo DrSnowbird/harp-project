@@ -16,35 +16,36 @@
 
 package edu.iu.frlayout;
 
-import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import edu.iu.harp.collective.Task;
-import edu.iu.harp.graph.vtx.LongDblArrVtxPartition;
-import edu.iu.harp.graph.vtx.LongDblArrVtxTable;
-import edu.iu.harp.util.Long2ObjectOpenHashMap;
+import edu.iu.harp.graph.vtx.IntFltArrVtxPartition;
+import edu.iu.harp.graph.vtx.IntFltArrVtxTable;
+import edu.iu.harp.util.Int2ObjectReuseHashMap;
 
-public class FRTask3 extends
-  Task<LongDblArrVtxPartition, LongDblArrVtxPartition> {
+public class FRTask3 extends Task<IntFltArrVtxPartition, IntFltArrVtxPartition> {
 
-  private LongDblArrVtxTable allGraphLayout;
-  private double t;
+  private IntFltArrVtxTable allGraphLayout;
+  private float t;
 
-  public FRTask3(LongDblArrVtxTable graphLayout, double t) {
+  public FRTask3(IntFltArrVtxTable graphLayout, double t) {
     allGraphLayout = graphLayout;
-    this.t = t;
+    this.t = (float) t;
   }
 
   @Override
-  public LongDblArrVtxPartition run(LongDblArrVtxPartition sgPartition)
+  public IntFltArrVtxPartition run(IntFltArrVtxPartition sgPartition)
     throws Exception {
-    long sgVtxID;
-    double[] sgDblArr = null;
-    double[] glDblArr1 = null;
-    double ded;
-    Long2ObjectOpenHashMap<double[]> sgMap = sgPartition.getVertexMap();
-    for (Long2ObjectMap.Entry<double[]> sgEntry : sgMap.long2ObjectEntrySet()) {
-      sgVtxID = sgEntry.getLongKey();
+    float t = this.t;
+    int sgVtxID;
+    float[] sgDblArr = null;
+    float[] glDblArr1 = null;
+    float ded;
+    Int2ObjectReuseHashMap<float[]> sgMap = sgPartition.getVertexMap();
+    for (Int2ObjectMap.Entry<float[]> sgEntry : sgMap.int2ObjectEntrySet()) {
+      sgVtxID = sgEntry.getIntKey();
       sgDblArr = sgEntry.getValue();
-      ded = Math.sqrt(sgDblArr[0] * sgDblArr[0] + sgDblArr[1] * sgDblArr[1]);
+      ded = (float) Math.sqrt(sgDblArr[0] * sgDblArr[0] + sgDblArr[1]
+        * sgDblArr[1]);
       if (ded > t) {
         ded = t / ded;
         sgDblArr[0] *= ded;

@@ -31,8 +31,8 @@ import edu.iu.harp.comm.resource.ResourcePool;
 public abstract class ReqSender {
   /** Class logger */
   private static final Logger LOG = Logger.getLogger(ReqSender.class);
-  private String host;
-  private int port;
+  private final String host;
+  private final int port;
   private Commutable data;
   private final ResourcePool resourcePool;
   private byte command;
@@ -45,7 +45,8 @@ public abstract class ReqSender {
   }
 
   public boolean execute() {
-    // Process
+    // Process data
+    // This is a local object
     Commutable processedData = null;
     try {
       processedData = processData(this.getData());

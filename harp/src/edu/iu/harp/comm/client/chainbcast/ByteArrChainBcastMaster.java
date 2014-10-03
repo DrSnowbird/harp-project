@@ -16,8 +16,8 @@
 
 package edu.iu.harp.comm.client.chainbcast;
 
-import java.io.DataOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 
 import org.apache.log4j.Logger;
 
@@ -26,6 +26,7 @@ import edu.iu.harp.comm.Constants;
 import edu.iu.harp.comm.Workers;
 import edu.iu.harp.comm.data.ByteArray;
 import edu.iu.harp.comm.data.Commutable;
+import edu.iu.harp.comm.resource.DataSerializer;
 import edu.iu.harp.comm.resource.ResourcePool;
 
 public class ByteArrChainBcastMaster extends ChainBcastMaster {
@@ -62,6 +63,10 @@ public class ByteArrChainBcastMaster extends ChainBcastMaster {
       ByteArray byteArray = (ByteArray) processedData;
       this.getResourcePool().getByteArrayPool()
         .releaseArrayInUse(byteArray.getArray());
+      if (byteArray.getMetaArray() != null) {
+        this.getResourcePool().getIntArrayPool()
+          .releaseArrayInUse(byteArray.getMetaArray());
+      }
     }
   }
 
@@ -76,41 +81,49 @@ public class ByteArrChainBcastMaster extends ChainBcastMaster {
   protected void sendByteArray(Connection conn, ByteArray byteArray)
     throws Exception {
     int size = byteArray.getSize();
-    // Get meta data
-    int metaDataSize = 0;
-    int[] metaData = byteArray.getMetaData();
-    if ((metaData != null) && (metaData.length != 0)) {
-      metaDataSize = metaData.length;
-      LOG.info("Meta data (int array) size: " + metaDataSize);
-    }
+    // Get meta array
+    int metaArraySize = byteArray.getMetaArraySize();
     // Send meta data
-    DataOutputStream dout = conn.getDataOutputStream();
-    dout.writeByte(this.getCommand());
-    dout.writeInt(size);
-    dout.writeInt(metaDataSize);
-    dout.flush();
-    if (metaDataSize > 0) {
-      for (int i = 0; i < metaDataSize; i++) {
-        dout.writeInt(metaData[i]);
-        LOG.info("metaData[" + i + "]: " + metaData[i]);
+    OutputStream out = conn.getOutputStream();
+    out.write(this.getCommand());
+    // write byte array size and meta array size
+    byte[] sizeBytes = this.getResourcePool().getByteArrayPool().getArray(8);
+    DataSerializer serializer = new DataSerializer(sizeBytes);
+    serializer.writeInt(size);
+    serializer.writeInt(metaArraySize);
+    out.write(sizeBytes);
+    this.getResourcePool().getByteArrayPool().releaseArrayInUse(sizeBytes);
+    // Write meta array
+    // array size should match with the array
+    // if any inconsistency, use meta array size as standard
+    if (metaArraySize > 0) {
+      int[] metaArray = byteArray.getMetaArray();
+      byte[] metaArrayBytes = this.getResourcePool().getByteArrayPool()
+        .getArray(4 * metaArraySize);
+      serializer.setData(metaArrayBytes);
+      for (int i = 0; i < metaArraySize; i++) {
+        serializer.writeInt(metaArray[i]);
       }
-      dout.flush();
+      out.write(metaArrayBytes);
+      this.getResourcePool().getByteArrayPool()
+        .releaseArrayInUse(metaArrayBytes);
     }
+    out.flush();
     byte[] bytes = byteArray.getArray();
     int start = byteArray.getStart();
-    sendBytes(dout, bytes, start, size);
+    sendBytes(out, bytes, start, size);
   }
 
-  private void sendBytes(DataOutputStream dout, byte[] bytes, int start,
-    int size) throws IOException {
+  private void sendBytes(OutputStream out, byte[] bytes, int start, int size)
+    throws IOException {
     while ((start + Constants.SENDRECV_BYTE_UNIT) <= size) {
-      dout.write(bytes, start, Constants.SENDRECV_BYTE_UNIT);
+      out.write(bytes, start, Constants.SENDRECV_BYTE_UNIT);
       start = start + Constants.SENDRECV_BYTE_UNIT;
-      dout.flush();
+      out.flush();
     }
     if (start < size) {
-      dout.write(bytes, start, size - start);
-      dout.flush();
+      out.write(bytes, start, size - start);
+      out.flush();
     }
   }
 }

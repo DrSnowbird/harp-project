@@ -57,6 +57,7 @@ public class WritableObjChainBcastHandler extends ByteArrChainBcastHandler {
       }
       throw e;
     }
+    // Meta array doesn't exist in broadcasting writable object
     this.getResourcePool().getByteArrayPool()
       .releaseArrayInUse(byteArray.getArray());
     return obj;

@@ -48,8 +48,8 @@ public class StructObjReqSender extends ByteArrReqSender {
     String className = data.getClass().getName();
     StructObject obj = (StructObject) data;
     int size = obj.getSizeInBytes() + className.length() * 2 + 4;
-    LOG
-      .info("Struct Obj class name: " + className + ", size in bytes: " + size);
+    // LOG
+    //  .info("Struct Obj class name: " + className + ", size in bytes: " + size);
     // Serialize to bytes
     byte[] bytes = this.getResourcePool().getByteArrayPool().getArray(size);
     try {
@@ -59,12 +59,13 @@ public class StructObjReqSender extends ByteArrReqSender {
       throw e;
     }
     // Create byte array
-    ByteArray array = new ByteArray();
-    array.setArray(bytes);
-    array.setMetaData(null);
-    array.setSize(size);
-    array.setStart(0);
-    return array;
+    ByteArray byteArray = new ByteArray();
+    byteArray.setArray(bytes);
+    byteArray.setSize(size);
+    byteArray.setStart(0);
+    byteArray.setMetaArray(null);
+    byteArray.setMetaArraySize(0);
+    return byteArray;
   }
 
   public static void serializeStructObjToBytes(String className,

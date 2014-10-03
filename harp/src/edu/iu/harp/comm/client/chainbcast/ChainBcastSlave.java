@@ -16,8 +16,8 @@
 
 package edu.iu.harp.comm.client.chainbcast;
 
-import java.io.DataOutput;
 import java.io.IOException;
+import java.io.OutputStream;
 
 import org.apache.log4j.Logger;
 
@@ -40,9 +40,9 @@ public class ChainBcastSlave {
 
   public static void sendACK(String host, int port) {
     Connection conn = CommUtil.startConnection(host, port);
-    DataOutput dout = conn.getDataOutputStream();
+    OutputStream out = conn.getOutputStream();
     try {
-      dout.writeByte(Constants.CHAIN_BCAST_ACK);
+      out.write(Constants.CHAIN_BCAST_ACK);
     } catch (IOException e) {
       LOG.error("Fail to send bcast ACK.", e);
     }

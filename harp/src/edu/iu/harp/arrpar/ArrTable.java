@@ -36,7 +36,7 @@ public class ArrTable<A extends Array<?>, C extends ArrCombiner<A>> implements
 
   private static final Logger LOG = Logger.getLogger(ArrTable.class);
 
-  private int tableID;
+  private final int tableID;
   private Int2ObjectAVLTreeMap<ArrPartition<A>> partitions;
   private Class<A> aClass;
   private Class<C> cClass;
@@ -87,6 +87,10 @@ public class ArrTable<A extends Array<?>, C extends ArrCombiner<A>> implements
       combiner.combine(curPartition, partition);
       return true;
     }
+  }
+  
+  public ArrPartition<A> getPartition(int partitionID) {
+    return this.partitions.get(partitionID);
   }
 
   public ArrPartition<A> removePartition(int partitionID) {

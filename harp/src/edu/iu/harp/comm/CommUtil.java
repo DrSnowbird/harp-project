@@ -18,7 +18,7 @@ package edu.iu.harp.comm;
 
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 
-import java.io.DataOutputStream;
+import java.io.OutputStream;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -33,10 +33,34 @@ public class CommUtil {
 
   public static Connection startConnection(String host, int port) {
     Connection conn = null;
-    try {
-      conn = new Connection(host, port, 0);
-    } catch (Exception e) {
-      LOG.error("Exception in connecting " + host + ":" + port, e);
+    boolean isException = false;
+    int count = 0;
+    do {
+      isException = false;
+      try {
+        conn = new Connection(host, port, 0);
+      } catch (Exception e) {
+        // Try to solve
+        // java.net.NoRouteToHostException: Cannot assign requested address
+        if (e instanceof java.net.NoRouteToHostException) {
+          LOG.error("NoRouteToHostException when connecting " + host + ":"
+            + port, e);
+          try {
+            Thread.sleep(1000);
+          } catch (InterruptedException e1) {
+          }
+          isException = true;
+          count++;
+        } else if (e instanceof java.net.ConnectException) {
+          LOG.error("Exception when connecting " + host + ":" + port + ". "
+            + e.getMessage());
+        } else {
+          LOG.error("Exception when connecting " + host + ":" + port, e);
+        }
+      }
+    } while (isException && count < 60);
+    if (isException) {
+      LOG.error("Fail to connect " + host + ":" + port);
     }
     return conn;
   }
@@ -54,9 +78,9 @@ public class CommUtil {
       return;
     }
     try {
-      DataOutputStream dout = conn.getDataOutputStream();
-      dout.writeByte(Constants.RECEIVER_QUIT_REQUEST);
-      dout.flush();
+      OutputStream out = conn.getOutputStream();
+      out.write(Constants.RECEIVER_QUIT_REQUEST);
+      out.flush();
       conn.close();
     } catch (Exception e) {
       conn.close();
@@ -86,7 +110,7 @@ public class CommUtil {
   public static void closeExecutor(ExecutorService executor, String executorName) {
     closeExecutor(executor, executorName, Constants.TERMINATION_TIMEOUT_1);
   }
-  
+
   /**
    * Wait either maxWaitTime or maxWaitCount comes first
    * 
@@ -107,7 +131,7 @@ public class CommUtil {
         LOG.error("MAX TIME OUT. NO DATA.");
         break;
       } else if (!data.getClass().equals(cClass)) {
-        LOG.error("IRRELEVANT DATA TYPE: " + data.getClass().getName());
+        // LOG.error("IRRELEVANT DATA TYPE: " + data.getClass().getName());
         waitList.add(data);
         curWaitCount++;
         data = null;
@@ -119,6 +143,7 @@ public class CommUtil {
     if (data == null) {
       return null;
     }
+    // Make sure data is C type and then convert
     return (C) data;
   }
 }

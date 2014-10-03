@@ -27,6 +27,7 @@ import edu.iu.harp.comm.Constants;
 import edu.iu.harp.comm.WorkerData;
 import edu.iu.harp.comm.Workers;
 import edu.iu.harp.comm.client.ByteArrReqSender;
+import edu.iu.harp.comm.client.ReqSendCommander;
 import edu.iu.harp.comm.data.ByteArray;
 import edu.iu.harp.comm.data.Commutable;
 import edu.iu.harp.comm.resource.ResourcePool;
@@ -91,8 +92,8 @@ public class StructParMultiThreadCatcher<P extends StructPartition, T extends St
       }
       // Get the byte array
       ByteArray byteArray = (ByteArray) data;
-      int[] metaData = byteArray.getMetaData();
-      int workerID = metaData[0];
+      int[] metaArray = byteArray.getMetaArray();
+      int workerID = metaArray[0];
       // Continue sending to your next neighbor
       if (workerID != this.workers.getNextID()) {
         ByteArrReqSender byteArraySender = new ByteArrReqSender(workers

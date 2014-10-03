@@ -16,10 +16,7 @@
 
 package edu.iu.harp.graph.vtx;
 
-import org.apache.log4j.Logger;
-
 import edu.iu.harp.comm.Constants;
-import edu.iu.harp.comm.Workers;
 import edu.iu.harp.comm.client.StructObjReqSender;
 import edu.iu.harp.comm.data.ByteArray;
 import edu.iu.harp.comm.data.Commutable;
@@ -29,30 +26,30 @@ import edu.iu.harp.comm.resource.ResourcePool;
 public class MultiStructParDeliver<P extends StructPartition> extends
   StructObjReqSender {
 
-  /** Class logger */
-  private static final Logger LOG = Logger.getLogger(MultiStructParDeliver.class);
-
   private int workerID;
+  private int tableID;
   private int partitionCount;
 
-  public MultiStructParDeliver(Workers workers, ResourcePool pool, MultiStructPartition<P> multiPartition) {
-    // Make sure that next worker is not self.
-    // Control this in the benchmark driver program
-    super(workers.getNextInfo().getNode(), workers.getNextInfo().getPort(),
-      multiPartition, pool);
-    this.workerID = workers.getSelfID();
-    this.partitionCount = multiPartition.getPartitionList().size();
-    LOG.info("workerID: " + workerID + ", partitionCount: " + partitionCount);
+  public MultiStructParDeliver(int workerID, String nextHost, int nextPort,
+    int tableID, MultiStructPartition multiPartition, ResourcePool pool) {
+    super(nextHost, nextPort, multiPartition, pool);
+    this.workerID = workerID;
+    this.tableID = tableID;
+    this.partitionCount = multiPartition.getNumPartitions();
     this.setCommand(Constants.BYTE_ARRAY_REQUEST);
   }
 
   @Override
   protected Commutable processData(Commutable data) throws Exception {
-    ByteArray array = (ByteArray) super.processData(data);
-    int[] metaData = new int[2];
-    metaData[0] = this.workerID;
-    metaData[1] = this.partitionCount;
-    array.setMetaData(metaData);
-    return array;
+    ByteArray byteArray = (ByteArray) super.processData(data);
+    int[] metaArray = this.getResourcePool().getIntArrayPool().getArray(3);
+    // The order of elements of meta array is the same across of kinds of
+    // send/recv
+    metaArray[0] = workerID;
+    metaArray[1] = tableID;
+    metaArray[2] = partitionCount;
+    byteArray.setMetaArray(metaArray);
+    byteArray.setMetaArraySize(3);
+    return byteArray;
   }
 }

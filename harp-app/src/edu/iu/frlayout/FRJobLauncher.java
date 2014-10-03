@@ -110,12 +110,13 @@ public class FRJobLauncher extends Configured implements Tool {
     jobConfig.setInt(FRConstants.TOTAL_VTX, totalVtx);
     jobConfig.setInt(FRConstants.NUM_MAPS, numMapTasks);
     jobConfig.setInt(FRConstants.PARTITION_PER_WORKER, partiitonPerWorker);
+    jobConfig.setInt("mapreduce.job.max.split.locations", 10000);
     // input class to file-based class
     // job.setInputFormatClass(DataFileInputFormat.class);
     job.setInputFormatClass(MultiFileInputFormat.class);
     // job.setOutputFormatClass(SequenceFileOutputFormat.class);
     job.setJarByClass(FRJobLauncher.class);
-    job.setMapperClass(FRMultiThreadMapper.class);
+    job.setMapperClass(FRCollectiveMapper.class);
     org.apache.hadoop.mapred.JobConf jobConf = (JobConf) job.getConfiguration();
     jobConf.set("mapreduce.framework.name", "map-collective");
     jobConf.setNumMapTasks(numMapTasks);

@@ -32,28 +32,34 @@ public class DblArrParDeliver extends DoubleArrReqSender {
   /** Class logger */
   private static final Logger LOG = Logger.getLogger(DblArrParDeliver.class);
 
-  private int workerID;
-  private int partitionID;
+  private final int workerID;
+  private final int tableID;
+  private final int partitionID;
 
-  public DblArrParDeliver(Workers workers, ResourcePool pool,
+  public DblArrParDeliver(Workers workers, ResourcePool pool, int tableID,
     ArrPartition<DoubleArray> partition) {
     // Make sure that next worker is not self.
     // Control this in the benchmark driver program
     super(workers.getNextInfo().getNode(), workers.getNextInfo().getPort(),
       partition.getArray(), pool);
     this.workerID = workers.getSelfID();
+    this.tableID = tableID;
     this.partitionID = partition.getPartitionID();
-    LOG.info("workerID: " + workerID + ", partitionID: " + partitionID);
+    // LOG.info("workerID: " + workerID + ", partitionID: " + partitionID);
     this.setCommand(Constants.BYTE_ARRAY_REQUEST);
   }
 
   @Override
   protected Commutable processData(Commutable data) throws Exception {
-    ByteArray array = (ByteArray) super.processData(data);
-    int[] metaData = new int[2];
-    metaData[0] = this.workerID;
-    metaData[1] = this.partitionID;
-    array.setMetaData(metaData);
-    return array;
+    ByteArray byteArray = (ByteArray) super.processData(data);
+    int[] metaArray = this.getResourcePool().getIntArrayPool().getArray(3);
+    // Worker, table, partition, the order should be kept in all kinds of
+    // messages
+    metaArray[0] = workerID;
+    metaArray[1] = tableID;
+    metaArray[2] = partitionID;
+    byteArray.setMetaArray(metaArray);
+    byteArray.setMetaArraySize(3);
+    return byteArray;
   }
 }

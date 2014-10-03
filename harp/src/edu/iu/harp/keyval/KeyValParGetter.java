@@ -61,9 +61,11 @@ public class KeyValParGetter<K extends Key, V extends Value, C extends ValCombin
       LOG.error("Fail to create KeyVal partition object.", e);
       return null;
     }
-    partition.setPartitionID(byteArray.getMetaData()[0]);
+    partition.setPartitionID(byteArray.getMetaArray()[0]);
     this.resourcePool.getByteArrayPool()
       .releaseArrayInUse(byteArray.getArray());
+    this.resourcePool.getIntArrayPool().releaseArrayInUse(
+      byteArray.getMetaArray());
     return partition;
   }
 }

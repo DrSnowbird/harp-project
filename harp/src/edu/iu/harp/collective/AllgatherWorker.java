@@ -25,7 +25,12 @@ import edu.iu.harp.arrpar.DoubleArrPlus;
 import edu.iu.harp.comm.Constants;
 import edu.iu.harp.comm.WorkerData;
 import edu.iu.harp.comm.Workers;
+import edu.iu.harp.comm.client.allgather.ArrTableBDECatcher;
 import edu.iu.harp.comm.client.allgather.ArrTableCatcher;
+import edu.iu.harp.comm.client.allgather.ArrTableGatherBcastCatcher;
+import edu.iu.harp.comm.client.allgather.ArrTableMultiParCatcher;
+import edu.iu.harp.comm.client.allgather.ArrTableMultiThreadCatcher;
+import edu.iu.harp.comm.client.allgather.ArrTableOneCatcher;
 import edu.iu.harp.comm.data.Array;
 import edu.iu.harp.comm.data.DoubleArray;
 import edu.iu.harp.comm.request.AllgatherReq;
@@ -58,7 +63,7 @@ public class AllgatherWorker extends CollCommWorker {
       port, Constants.NUM_HANDLER_THREADS);
     receiver.start();
     // Master check if all slaves are ready
-    boolean success = masterBarrier(workers, workerData, resourcePool);
+    boolean success = masterHandshake(workers, workerData, resourcePool);
     LOG.info("Barrier: " + success);
     // ------------------------------------------------------------------------
     // Generate data partition
@@ -106,13 +111,16 @@ public class AllgatherWorker extends CollCommWorker {
   public static <A extends Array<?>, C extends ArrCombiner<A>> void allgather(
     Workers workers, WorkerData workerData, ResourcePool resourcePool,
     ArrTable<A, C> table) {
+    if (workers.getNumWorkers() <= 1) {
+      return;
+    }
     int workerID = workers.getSelfID();
     int[] partitionIDs = table.getPartitionIDs();
     // Gather the information of generated partitions to master
     // Generate partition and worker mapping for regrouping
     // Bcast partition regroup request
+    // LOG.info("Gather partition information.");
     long startTime = System.currentTimeMillis();
-    LOG.info("Gather partition information.");
     ParGenAck pGenAck = new ParGenAck(workerID, partitionIDs);
     ParGenAck[][] pGenAckRef = new ParGenAck[1][];
     try {
@@ -121,13 +129,14 @@ public class AllgatherWorker extends CollCommWorker {
       LOG.error("Error when gathering data.", e);
       return;
     }
-    LOG.info("All partition information are gathered.");
     long endTime = System.currentTimeMillis();
+    // LOG.info("All partition information are gathered.");
     LOG.info("Allgather start sync overhead (ms): " + (endTime - startTime));
+    AllgatherReq[] allgatherReqRef = new AllgatherReq[1];
     AllgatherReq allgatherReq = null;
     if (workers.isMaster()) {
-      int totalPartitions = 0;
       ParGenAck[] pGenAcks = pGenAckRef[0];
+      int totalPartitions = 0;
       for (int i = 0; i < pGenAcks.length; i++) {
         int[] parIds = pGenAcks[i].getPartitionIds();
         totalPartitions = totalPartitions + parIds.length;
@@ -136,21 +145,88 @@ public class AllgatherWorker extends CollCommWorker {
           pGenAcks[i]);
       }
       allgatherReq = new AllgatherReq(totalPartitions);
+      allgatherReqRef[0] = allgatherReq;
     }
-    LOG.info("Bcast allgather information.");
+    pGenAckRef = null;
+    pGenAck = null;
+    // LOG.info("Bcast allgather information.");
     // Receiver believe it is bcasted
-    AllgatherReq[] allgatherReqRef = new AllgatherReq[1];
-    allgatherReqRef[0] = allgatherReq;
     reqChainBcast(allgatherReqRef, workers, workerData, resourcePool,
       AllgatherReq.class);
     allgatherReq = allgatherReqRef[0];
     // ------------------------------------------------------------------------
     int numThreads = Constants.NUM_DESERIAL_THREADS;
-    int totalParRecv = allgatherReq.getTotalRecvParNum();
-    ArrTableCatcher<A, C> catcher = new ArrTableCatcher<A, C>(workers, workerData,
-      resourcePool, totalParRecv, table, numThreads);
+    int totalParRecv = allgatherReq.getTotalNumPartition();
+    ArrTableCatcher<A, C> catcher = new ArrTableCatcher<A, C>(workers,
+      workerData, resourcePool, totalParRecv, table, numThreads);
     catcher.waitAndGet();
-    resourcePool.getWritableObjectPool().releaseWritableObjectInUse(
-      allgatherReq);
+    resourcePool.getWritableObjectPool().freeWritableObjectInUse(allgatherReq);
+    allgatherReqRef = null;
+    allgatherReq = null;
+  }
+
+  /**
+   * When there is only one partition per worker. We use this simplified
+   * allgather.
+   * 
+   * @param workers
+   * @param workerData
+   * @param resourcePool
+   * @param table
+   * @param numPartitionPerWorker
+   * @throws Exception
+   */
+  public static <A extends Array<?>, C extends ArrCombiner<A>> void allgatherOne(
+    Workers workers, WorkerData workerData, ResourcePool resourcePool,
+    ArrTable<A, C> table) throws Exception {
+    // ArrTableCatcher<A, C> catcher = new ArrTableCatcher<A, C>(workers,
+    //  workerData, resourcePool, workers.getNumWorkers(), table,
+    //  Constants.NUM_DESERIAL_THREADS);
+    // ArrTableMultiThreadCatcher<A, C> catcher = new ArrTableMultiThreadCatcher<A, C>(
+    //  workers, workerData, resourcePool, workers.getNumWorkers(), table,
+    //  Constants.NUM_DESERIAL_THREADS);
+    // ArrTableMultiParCatcher<A, C> catcher = new ArrTableMultiParCatcher<A, C>(
+    //  workers, workerData, resourcePool, workers.getNumWorkers(), table,
+    //  Constants.NUM_DESERIAL_THREADS);
+    ArrTableOneCatcher<A, C> catcher = new ArrTableOneCatcher<A, C>(workers,
+      workerData, resourcePool, table);
+    boolean success = catcher.waitAndGet();
+    if (!success) {
+      throw new Exception("Fail to allgatherOne");
+    }
+  }
+
+  /**
+   * When the total number of partitions are known, and each worker has multiple
+   * partitions
+   * 
+   * @param workers
+   * @param workerData
+   * @param resourcePool
+   * @param table
+   * @param totalParRecv
+   * @throws Exception
+   */
+  public static <A extends Array<?>, C extends ArrCombiner<A>> void allgatherTotalKnown(
+    Workers workers, WorkerData workerData, ResourcePool resourcePool,
+    ArrTable<A, C> table, int totalParRecv) throws Exception {    
+    // ArrTableCatcher<A, C> catcher = new ArrTableCatcher<A, C>(workers,
+    // workerData, resourcePool, totalParRecv, table,
+    // Constants.NUM_DESERIAL_THREADS);
+    // ArrTableMultiThreadCatcher<A, C> catcher = new ArrTableMultiThreadCatcher<A, C>(
+    //  workers, workerData, resourcePool, totalParRecv, table,
+    //  Constants.NUM_DESERIAL_THREADS);
+    ArrTableMultiParCatcher<A, C> catcher = new ArrTableMultiParCatcher<A, C>(
+      workers, workerData, resourcePool, totalParRecv, table,
+      Constants.NUM_DESERIAL_THREADS);
+    // ArrTableGatherBcastCatcher<A, C> catcher = new ArrTableGatherBcastCatcher<A, C>(
+    //  workers, workerData, resourcePool, totalParRecv, table,
+    //  Constants.NUM_DESERIAL_THREADS);
+    // ArrTableBDECatcher<A, C> catcher = new ArrTableBDECatcher<A, C>(workers,
+    //  workerData, resourcePool, table, Constants.NUM_DESERIAL_THREADS);
+    boolean success = catcher.waitAndGet();
+    if (!success) {
+      throw new Exception("Fail to allgatherTotalKnown");
+    }
   }
 }

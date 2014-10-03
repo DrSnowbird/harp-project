@@ -45,8 +45,8 @@ public class StructObjChainBcastMaster extends ByteArrChainBcastMaster {
     String className = obj.getClass().getName();
     // Obj size + class name size (including characters and the total length)
     int size = obj.getSizeInBytes() + className.length() * 2 + 4;
-    LOG
-      .info("Struct Obj class name: " + className + ", size in bytes: " + size);
+    // LOG
+    //  .info("Struct Obj class name: " + className + ", size in bytes: " + size);
     // Serialize to bytes
     byte[] bytes = this.getResourcePool().getByteArrayPool().getArray(size);
     try {
@@ -58,7 +58,7 @@ public class StructObjChainBcastMaster extends ByteArrChainBcastMaster {
     // Create byte array
     ByteArray array = new ByteArray();
     array.setArray(bytes);
-    array.setMetaData(null);
+    array.setMetaArray(null);
     array.setSize(size);
     array.setStart(0);
     return array;

@@ -21,6 +21,8 @@ public class ResourcePool {
   private final ByteArrayPool byteArrays;
 
   private final IntArrayPool intArrays;
+  
+  private final FloatArrayPool floatArrays;
 
   private final DoubleArrayPool doubleArrays;
 
@@ -31,6 +33,7 @@ public class ResourcePool {
   public ResourcePool() {
     byteArrays = new ByteArrayPool();
     intArrays = new IntArrayPool();
+    floatArrays = new FloatArrayPool();
     doubleArrays = new DoubleArrayPool();
     objects = new WritableObjectPool();
     streams = new ByteArrayOutputStreamPool();
@@ -42,6 +45,10 @@ public class ResourcePool {
 
   public IntArrayPool getIntArrayPool() {
     return intArrays;
+  }
+
+  public FloatArrayPool getFloatArrayPool() {
+    return floatArrays;
   }
 
   public DoubleArrayPool getDoubleArrayPool() {

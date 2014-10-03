@@ -41,10 +41,11 @@ public class KeyValParSender<K extends Key, V extends Value, C extends ValCombin
 
   @Override
   protected Commutable processData(Commutable data) throws Exception {
-    ByteArray array = (ByteArray) super.processData(data);
-    int[] metaData = new int[1];
-    metaData[0] = this.partitionID;
-    array.setMetaData(metaData);
-    return array;
+    ByteArray byteArray = (ByteArray) super.processData(data);
+    int[] metaArray = this.getResourcePool().getIntArrayPool().getArray(1);
+    metaArray[0] = this.partitionID;
+    byteArray.setMetaArray(metaArray);
+    byteArray.setMetaArraySize(1);
+    return byteArray;
   }
 }

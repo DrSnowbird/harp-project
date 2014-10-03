@@ -94,6 +94,7 @@ public class EdgePartition<I extends VertexID, E extends EdgeVal> implements Par
         .getArray(expectedSize);
       ByteArray array = new ByteArray();
       array.setArray(bytes);
+      // At the beginning, no contents, so no size
       array.setSize(0);
       arrays.add(array);
     }
@@ -379,6 +380,9 @@ public class EdgePartition<I extends VertexID, E extends EdgeVal> implements Par
   public void release() {
     clean();
     for (ByteArray byteArray : this.arrays) {
+      // No need to release meta data
+      // In sending, meta data are added, then meta array are removed
+      // In receiving, meta array are got, then are removed.
       this.resourcePool.getByteArrayPool().releaseArrayInUse(
         byteArray.getArray());
     }

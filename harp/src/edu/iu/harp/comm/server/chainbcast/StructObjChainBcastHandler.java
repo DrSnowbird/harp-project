@@ -36,6 +36,7 @@ public class StructObjChainBcastHandler extends ByteArrChainBcastHandler {
     StructObject obj = StructObjReqHandler.deserializeStructObjFromBytes(
       byteArray.getArray(), byteArray.getSize(), this.getResourcePool());
     // If success, release bytes
+    // Meta array doesn't exist in broadcasting struct object
     this.getResourcePool().getByteArrayPool()
       .releaseArrayInUse(byteArray.getArray());
     return obj;

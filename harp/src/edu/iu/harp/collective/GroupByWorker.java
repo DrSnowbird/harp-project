@@ -65,7 +65,7 @@ public class GroupByWorker extends CollCommWorker {
       port, Constants.NUM_HANDLER_THREADS);
     receiver.start();
     // Master check if all slaves are ready
-    boolean success = masterBarrier(workers, workerData, resourcePool);
+    boolean success = masterHandshake(workers, workerData, resourcePool);
     LOG.info("Barrier: " + success);
     // ------------------------------------------------------------------------
     // Generate words into wordcount table

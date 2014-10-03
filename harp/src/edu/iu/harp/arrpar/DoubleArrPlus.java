@@ -28,7 +28,7 @@ public class DoubleArrPlus extends ArrCombiner<DoubleArray> {
     double[] doubles2 = newPar.getArray().getArray();
     int size2 = newPar.getArray().getSize();
     if (size1 != size2) {
-      throw new Exception();
+      throw new Exception("size1: " + size1 + ", size2: " + size2);
     }
     for (int i = 0; i < size2; i++) {
       doubles1[i] = doubles1[i] + doubles2[i];

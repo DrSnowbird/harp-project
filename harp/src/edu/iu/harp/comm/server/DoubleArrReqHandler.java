@@ -33,11 +33,21 @@ public class DoubleArrReqHandler extends ByteArrReqHandler {
 
   @Override
   protected Commutable processByteArray(ByteArray byteArray) throws Exception {
-    DoubleArray doubleArray = deserializeBytesToDoubleArray(
-      byteArray.getArray(), this.getResourcePool());
-    // If success, release bytes
-    this.getResourcePool().getByteArrayPool()
-      .releaseArrayInUse(byteArray.getArray());
+    byte[] bytes = byteArray.getArray();
+    int size = byteArray.getSize();
+    DoubleArray doubleArray = null;
+    if (bytes != null && size > 0) {
+      doubleArray = deserializeBytesToDoubleArray(byteArray.getArray(),
+        this.getResourcePool());
+      // If success, release bytes
+      // Meta array doesn't exist in sending double array
+      this.getResourcePool().getByteArrayPool()
+        .releaseArrayInUse(byteArray.getArray());
+    } else {
+      doubleArray = new DoubleArray();
+      doubleArray.setArray(null);
+      doubleArray.setSize(0);
+    }
     return doubleArray;
   }
 
@@ -59,6 +69,7 @@ public class DoubleArrReqHandler extends ByteArrReqHandler {
       throw e;
     }
     DoubleArray doubleArray = new DoubleArray();
+    // Start is 0 in default
     doubleArray.setArray(doubles);
     doubleArray.setSize(doublesSize);
     return doubleArray;

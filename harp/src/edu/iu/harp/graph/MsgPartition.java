@@ -295,6 +295,8 @@ public class MsgPartition<I extends VertexID, M extends MsgVal> implements
     for (ByteArray byteArray : this.arrays) {
       this.resourcePool.getByteArrayPool().releaseArrayInUse(
         byteArray.getArray());
+      this.resourcePool.getIntArrayPool().releaseArrayInUse(
+        byteArray.getMetaArray());
     }
   }
 

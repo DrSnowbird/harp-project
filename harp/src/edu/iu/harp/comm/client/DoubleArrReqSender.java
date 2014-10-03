@@ -35,21 +35,26 @@ public class DoubleArrReqSender extends ByteArrReqSender {
 
   @Override
   protected Commutable processData(Commutable data) throws Exception {
-    // Convert an int array to a byte array with meta data
+    // Convert a double array to a byte array with meta data
     DoubleArray doubleArray = (DoubleArray) this.getData();
     double[] doubles = doubleArray.getArray();
     int doublesSize = doubleArray.getSize();
-    int size = doublesSize * 8 + 4;
-    byte[] bytes = this.getResourcePool().getByteArrayPool().getArray(size);
-    try {
-      serializeDoublesToBytes(doubles, doublesSize, bytes);
-    } catch (Exception e) {
-      this.getResourcePool().getByteArrayPool().releaseArrayInUse(bytes);
-      throw e;
+    int size = 0;
+    byte[] bytes = null;
+    if (doubles != null && doublesSize != 0) {
+      size = doublesSize * 8 + 4;
+      bytes = this.getResourcePool().getByteArrayPool().getArray(size);
+      try {
+        serializeDoublesToBytes(doubles, doublesSize, bytes);
+      } catch (Exception e) {
+        this.getResourcePool().getByteArrayPool().releaseArrayInUse(bytes);
+        throw e;
+      }
     }
     ByteArray byteArray = new ByteArray();
     byteArray.setArray(bytes);
-    byteArray.setMetaData(null);
+    byteArray.setMetaArray(null);
+    byteArray.setMetaArraySize(0);
     byteArray.setSize(size);
     byteArray.setStart(0);
     return byteArray;

@@ -56,6 +56,7 @@ public class WritableObjReqHandler extends ByteArrReqHandler {
       }
       throw e;
     }
+    // Meta array doesn't exist in sending writable object
     this.getResourcePool().getByteArrayPool()
       .releaseArrayInUse(byteArray.getArray());
     return obj;

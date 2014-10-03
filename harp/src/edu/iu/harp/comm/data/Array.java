@@ -18,11 +18,11 @@ package edu.iu.harp.comm.data;
 
 public abstract class Array<T> extends Commutable {
   /** Array */
-  private T array;
+  private T array = null;
   /** Default is 0 */
-  private int size;
+  private int size = 0;
   /** Start position in the array data */
-  private int start;
+  private int start = 0;
 
   public void setArray(T array) {
     this.array = array;

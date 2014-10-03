@@ -16,8 +16,8 @@
 
 package edu.iu.harp.comm.client;
 
-import java.io.DataOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 
 import org.apache.log4j.Logger;
 
@@ -25,6 +25,7 @@ import edu.iu.harp.comm.Connection;
 import edu.iu.harp.comm.Constants;
 import edu.iu.harp.comm.data.ByteArray;
 import edu.iu.harp.comm.data.Commutable;
+import edu.iu.harp.comm.resource.DataSerializer;
 import edu.iu.harp.comm.resource.ResourcePool;
 
 /**
@@ -53,9 +54,19 @@ public class ByteArrReqSender extends ReqSender {
     // Processed data should be byte array
     if (!(this.getData() instanceof ByteArray)
       && (processedData instanceof ByteArray)) {
-      ByteArray array = (ByteArray) processedData;
-      this.getResourcePool().getByteArrayPool()
-        .releaseArrayInUse(array.getArray());
+      ByteArray byteArray = (ByteArray) processedData;
+      if (byteArray.getArray() != null) {
+        this.getResourcePool().getByteArrayPool()
+          .releaseArrayInUse(byteArray.getArray());
+      }
+      // byteArray.setArray(null);
+      // byteArray.setStart(0);
+      // byteArray.setSize(0);
+      if (byteArray.getMetaArray() != null) {
+        this.getResourcePool().getIntArrayPool()
+          .releaseArrayInUse(byteArray.getMetaArray());
+        // byteArray.setMetaArraySize(0);
+      }
     }
   }
 
@@ -71,7 +82,7 @@ public class ByteArrReqSender extends ReqSender {
    * Send command and meta data 1. command 2. byte array size 4. meta data size
    * 5. meta data content If failure, release the resource used to serialize the
    * meta data.
-   *
+   * 
    * @param conn
    * @param byteArray
    * @throws Exception
@@ -79,41 +90,54 @@ public class ByteArrReqSender extends ReqSender {
   protected void sendByteArray(Connection conn, ByteArray byteArray)
     throws Exception {
     int size = byteArray.getSize();
-    // Get meta data if it exists
-    int metaDataSize = 0;
-    int[] metaData = byteArray.getMetaData();
-    if ((metaData != null) && (metaData.length != 0)) {
-      metaDataSize = metaData.length;
-      LOG.info("Meta data (int array) size: " + metaDataSize);
-    }
+    // Get meta array size
+    // Here we trust the size is correct
+    int metaArraySize = byteArray.getMetaArraySize();
     // Send meta data
-    DataOutputStream dout = conn.getDataOutputStream();
-    dout.writeByte(this.getCommand());
-    dout.writeInt(size);
-    dout.writeInt(metaDataSize);
-    if (metaDataSize > 0) {
-      for (int i = 0; i < metaDataSize; i++) {
-        dout.writeInt(metaData[i]);
-        LOG.info("metaData[i]: " + metaData[i]);
+    OutputStream out = conn.getOutputStream();
+    out.write(this.getCommand());
+    // dout.writeInt(size);
+    // dout.writeInt(metaArraySize);
+    byte[] sizeBytes = this.getResourcePool().getByteArrayPool().getArray(8);
+    DataSerializer serializer = new DataSerializer(sizeBytes);
+    serializer.writeInt(size);
+    serializer.writeInt(metaArraySize);
+    out.write(sizeBytes);
+    this.getResourcePool().getByteArrayPool().releaseArrayInUse(sizeBytes);
+    if (metaArraySize > 0) {
+      int[] metaArray = byteArray.getMetaArray();
+      byte[] metaArrayBytes = this.getResourcePool().getByteArrayPool()
+        .getArray(4 * metaArraySize);
+      serializer.setData(metaArrayBytes);
+      for (int i = 0; i < metaArraySize; i++) {
+        serializer.writeInt(metaArray[i]);
+        // dout.writeInt(metaArray[i]);
+        // LOG.info("metaData[i]: " + metaData[i]);
       }
+      out.write(metaArrayBytes);
+      this.getResourcePool().getByteArrayPool()
+        .releaseArrayInUse(metaArrayBytes);
     }
-    dout.flush();
-    // Send content data
-    byte[] bytes = byteArray.getArray();
-    int start = byteArray.getStart();
-    sendBytes(dout, bytes, start, size);
+    out.flush();
+    // Send content data, check the array size first
+    // Sending or receiving null array is allowed
+    if (size > 0) {
+      byte[] bytes = byteArray.getArray();
+      int start = byteArray.getStart();
+      sendBytes(out, bytes, start, size);
+    }
   }
 
-  private void sendBytes(DataOutputStream dout, byte[] bytes, int start,
-    int size) throws IOException {
+  private void sendBytes(OutputStream out, byte[] bytes, int start, int size)
+    throws IOException {
     while ((start + Constants.SENDRECV_BYTE_UNIT) <= size) {
-      dout.write(bytes, start, Constants.SENDRECV_BYTE_UNIT);
+      out.write(bytes, start, Constants.SENDRECV_BYTE_UNIT);
       start = start + Constants.SENDRECV_BYTE_UNIT;
-      dout.flush();
+      out.flush();
     }
     if (start < size) {
-      dout.write(bytes, start, size - start);
-      dout.flush();
+      out.write(bytes, start, size - start);
+      out.flush();
     }
   }
 }

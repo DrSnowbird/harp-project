@@ -38,6 +38,7 @@ public class DoubleArrChainBcastHandler extends ByteArrChainBcastHandler {
       .deserializeBytesToDoubleArray(byteArray.getArray(),
         this.getResourcePool());
     // If success, release bytes
+    // Meta array doesn't exist in broadcasting double array
     this.getResourcePool().getByteArrayPool()
       .releaseArrayInUse(byteArray.getArray());
     return doubleArray;

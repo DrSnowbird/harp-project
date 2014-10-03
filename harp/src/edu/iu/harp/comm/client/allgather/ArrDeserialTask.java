@@ -16,6 +16,8 @@
 
 package edu.iu.harp.comm.client.allgather;
 
+import org.apache.log4j.Logger;
+
 import edu.iu.harp.arrpar.ArrPartition;
 import edu.iu.harp.collective.Task;
 import edu.iu.harp.comm.client.regroup.ArrParGetter;
@@ -25,6 +27,10 @@ import edu.iu.harp.comm.resource.ResourcePool;
 
 public class ArrDeserialTask<A extends Array<?>> extends
   Task<ByteArray, ArrPartition<A>> {
+
+  /** Class logger */
+  private static final Logger LOG = Logger.getLogger(ArrDeserialTask.class);
+
   private final ResourcePool resourcePool;
   private final Class<A> aClass;
 
@@ -35,13 +41,16 @@ public class ArrDeserialTask<A extends Array<?>> extends
 
   @Override
   public ArrPartition<A> run(ByteArray byteArray) throws Exception {
-    int partitionID = byteArray.getMetaData()[1];
+    // 0 source worker ID
+    // 1 table id
+    // 2 partition id
+    int partitionID = byteArray.getMetaArray()[2];
     A array = ArrParGetter.desiealizeToArray(byteArray, resourcePool, aClass);
-    if (array != null) {
-      ArrPartition<A> partition = new ArrPartition<A>(array, partitionID);
-      resourcePool.getByteArrayPool().releaseArrayInUse(byteArray.getArray());
-      return partition;
-    }
-    return null;
+    ArrPartition<A> partition = new ArrPartition<A>(array, partitionID);
+    // resourcePool.getByteArrayPool().releaseArrayInUse(byteArray.getArray());
+    // resourcePool.getIntArrayPool()
+    // .releaseArrayInUse(byteArray.getMetaArray());
+    return partition;
+
   }
 }

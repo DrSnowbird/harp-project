@@ -38,7 +38,7 @@ public class StructParBcastMaster<P extends StructPartition> extends
   public StructParBcastMaster(Workers workers, ResourcePool pool, P partition)
     throws Exception {
     super(partition, workers, pool);
-    this.partitionID = partition.getPartitionID();
+    partitionID = partition.getPartitionID();
     LOG.info("partitionID: " + partitionID);
     this.setCommand(Constants.BYTE_ARRAY_CHAIN_BCAST);
   }
@@ -46,9 +46,11 @@ public class StructParBcastMaster<P extends StructPartition> extends
   @Override
   protected Commutable processData(Commutable data) throws Exception {
     ByteArray array = (ByteArray) super.processData(data);
-    int[] metaData = new int[1];
-    metaData[0] = this.partitionID;
-    array.setMetaData(metaData);
+    // int[] metaData = new int[1];
+    int[] metaArray = this.getResourcePool().getIntArrayPool().getArray(1);
+    metaArray[0] = this.partitionID;
+    array.setMetaArray(metaArray);
+    array.setMetaArraySize(1);
     return array;
   }
 }

@@ -74,7 +74,7 @@ public abstract class ArrayPool<T> {
     T array = null;
     ObjectOpenHashSet<T>[] arrays = null;
     if (pos < 0) {
-      long start = System.currentTimeMillis();
+      // long start = System.currentTimeMillis();
       try {
         array = createNewArray(adjustSize);
       } catch (OutOfMemoryError e) {
@@ -119,15 +119,23 @@ public abstract class ArrayPool<T> {
   }
 
   public synchronized boolean releaseArrayInUse(T array) {
+    if (array == null) {
+      LOG.info("Null array.");
+      return false;
+    }
     int size = getSizeOfArray(array);
     // LOG.info("Release an array with size: " + size + ", with type "
     //  + array.getClass().getName());
     ObjectOpenHashSet<T>[] arrays = arrayMap.get(size);
     if (arrays == null) {
+      LOG.info("Fail to release an array with size: " + size + ", with type "
+        + array.getClass().getName() + " no set");
       return false;
     }
     boolean result = arrays[1].remove(array);
     if (!result) {
+      LOG.info("Fail to release an array with size: " + size + ", with type "
+        + array.getClass().getName() + " no array");
       return false;
     }
     arrays[0].add(array);

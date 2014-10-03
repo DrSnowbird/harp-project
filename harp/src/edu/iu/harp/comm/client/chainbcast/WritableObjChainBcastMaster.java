@@ -17,6 +17,7 @@
 package edu.iu.harp.comm.client.chainbcast;
 
 import java.io.DataOutputStream;
+import java.io.OutputStream;
 
 import org.apache.commons.io.output.ByteArrayOutputStream;
 import org.apache.log4j.Logger;
@@ -27,6 +28,7 @@ import edu.iu.harp.comm.Workers;
 import edu.iu.harp.comm.data.ByteArrayStream;
 import edu.iu.harp.comm.data.Commutable;
 import edu.iu.harp.comm.data.WritableObject;
+import edu.iu.harp.comm.resource.DataSerializer;
 import edu.iu.harp.comm.resource.ResourcePool;
 
 public class WritableObjChainBcastMaster extends ChainBcastMaster {
@@ -72,14 +74,18 @@ public class WritableObjChainBcastMaster extends ChainBcastMaster {
     ByteArrayStream stream = (ByteArrayStream) data;
     ByteArrayOutputStream byteOut = stream.getByteArrayStream();
     int size = byteOut.size();
-    DataOutputStream dout = conn.getDataOutputStream();
+    OutputStream out = conn.getOutputStream();
     try {
-      dout.writeByte(this.getCommand());
-      dout.writeInt(size);
-      dout.writeInt(0); // No meta data
-      dout.flush();
-      byteOut.writeTo(dout);
-      dout.flush();
+      out.write(this.getCommand());
+      byte[] sizeBytes = this.getResourcePool().getByteArrayPool().getArray(8);
+      DataSerializer serializer = new DataSerializer(sizeBytes);
+      serializer.writeInt(size);
+      serializer.writeInt(0); // No meta data
+      out.write(sizeBytes);
+      this.getResourcePool().getByteArrayPool().releaseArrayInUse(sizeBytes);
+      out.flush();
+      byteOut.writeTo(out);
+      out.flush();
     } finally {
       this.getResourcePool().getByteArrayOutputStreamPool()
         .releaseByteArrayOutputStreamInUse(byteOut);

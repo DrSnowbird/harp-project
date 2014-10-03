@@ -24,27 +24,31 @@ import edu.iu.harp.comm.data.StructObject;
 
 public class AllgatherReq extends StructObject {
 
-  private int totalPartitionRecv;
+  private int totalNumPartition;
 
   public AllgatherReq() {
   }
 
-  public AllgatherReq(int totalPartitionRecv) {
-    this.totalPartitionRecv = totalPartitionRecv;
+  public AllgatherReq(int totalNumPartition) {
+    this.totalNumPartition = totalNumPartition;
   }
 
-  public int getTotalRecvParNum() {
-    return this.totalPartitionRecv;
+  public int getTotalNumPartition() {
+    return this.totalNumPartition;
+  }
+
+  public void setTotalNumPartition(int totalNumPartition) {
+    this.totalNumPartition = totalNumPartition;
   }
 
   @Override
   public void write(DataOutput out) throws IOException {
-    out.writeInt(this.totalPartitionRecv);
+    out.writeInt(this.totalNumPartition);
   }
 
   @Override
   public void read(DataInput in) throws IOException {
-    this.totalPartitionRecv = in.readInt();
+    this.totalNumPartition = in.readInt();
   }
 
   @Override

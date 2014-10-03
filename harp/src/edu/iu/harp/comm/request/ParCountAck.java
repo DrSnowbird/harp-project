@@ -46,8 +46,16 @@ public class ParCountAck extends StructObject {
     this.partitionCount = in.readInt();
   }
 
+  public void setWorkerID(int workerID) {
+    this.workerID = workerID;
+  }
+
   public int getWorkerID() {
     return workerID;
+  }
+
+  public void setPartitionCount(int partitionCount) {
+    this.partitionCount = partitionCount;
   }
 
   public int getPartitionCount() {

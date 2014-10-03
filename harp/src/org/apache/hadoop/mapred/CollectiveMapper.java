@@ -19,8 +19,12 @@ package org.apache.hadoop.mapred;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.lang.management.GarbageCollectorMXBean;
+import java.lang.management.ManagementFactory;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -57,7 +61,8 @@ import edu.iu.harp.keyval.ValCombiner;
 import edu.iu.harp.keyval.Value;
 
 /**
- * This mapper is modified from original mapper in Hadoop.
+ * CollectiveMapper is extended from original mapper in Hadoop. It includes new
+ * APIs for in-memory collective communication.
  * 
  * @author zhangbj
  * 
@@ -77,6 +82,11 @@ public class CollectiveMapper<KEYIN, VALUEIN, KEYOUT, VALUEOUT> extends
   private WorkerData workerData;
   private Receiver receiver;
 
+  /**
+   * A Key-Value reader to read key-value inputs for this worker.
+   *
+   * @author zhangbj
+   */
   protected class KeyValReader {
     private Context context;
 
@@ -96,43 +106,83 @@ public class CollectiveMapper<KEYIN, VALUEIN, KEYOUT, VALUEOUT> extends
       return this.context.getCurrentValue();
     }
   }
-
-  private BufferedReader getNodesReader(int workerID, Context context)
-    throws IOException {
-    String jobDir = "/" + context.getJobID().toString();
-    String nodseFile = jobDir + "/nodes";
-    String lockFile = jobDir + "/lock";
-    LOG.info("TRY LOCK FILE " + lockFile + "; Worker ID " + workerID);
+  
+  private boolean tryLockFile(String lockFile, FileSystem fs) {
+    LOG.info("TRY LOCK FILE " + lockFile);
     boolean retry = false;
     int retryCount = 0;
     do {
       try {
         Path path = new Path(lockFile);
-        FileSystem fs = FileSystem.get(context.getConfiguration());
         retry = !fs.exists(path);
       } catch (Exception e) {
         retry = true;
         retryCount++;
         LOG.error("Error when reading nodes lock file.", e);
         if (retryCount == Constants.RETRY_COUNT) {
-          break;
+          return false;
         }
       }
     } while (retry);
-    LOG.info("Get NODES FILE " + nodseFile + "; Worker ID " + workerID);
-    Path path = new Path(nodseFile);
-    FileSystem fs = FileSystem.get(context.getConfiguration());
+    return true;
+  }
+  
+  private Map<Integer, Integer> getTaskWorkerMap(String tasksFile, FileSystem fs) {
+    LOG.info("Get task file " + tasksFile);
+    Map<Integer, Integer> taskWorkerMap = null;
+    Path path = new Path(tasksFile);
+    try {
+      taskWorkerMap = new TreeMap<Integer, Integer>();
+      FSDataInputStream in = fs.open(path);
+      BufferedReader br = new BufferedReader(new InputStreamReader(in));
+      String line = null;
+      String[] tokens = null;
+      while ((line = br.readLine()) != null) {
+        tokens = line.split("\t");
+        taskWorkerMap.put(Integer.parseInt(tokens[0]),
+          Integer.parseInt(tokens[1]));
+      }
+      br.close();
+    } catch (IOException e) {
+      LOG.error("No TASK FILE FOUND");
+      taskWorkerMap = null;
+    }
+    return taskWorkerMap;
+  }
+
+  private BufferedReader getNodesReader(String nodesFile,  FileSystem fs)
+    throws IOException {
+    LOG.info("Get nodes file " + nodesFile);
+    Path path = new Path(nodesFile);
     FSDataInputStream in = fs.open(path);
     BufferedReader br = new BufferedReader(new InputStreamReader(in));
     return br;
   }
 
   private boolean initCollCommComponents(Context context) throws IOException {
+    // Get file names
+    String jobDir = "/" + context.getJobID().toString();
+    String nodesFile = jobDir + "/nodes";
+    String tasksFile = jobDir + "/tasks";
+    String lockFile = jobDir + "/lock";
+    FileSystem fs = FileSystem.get(context.getConfiguration());
+    // Try lock
+    boolean success = tryLockFile(lockFile, fs);
+    if (!success) {
+      return false;
+    }
+    Map<Integer, Integer> taskWorkerMap = getTaskWorkerMap(tasksFile, fs);
     // Get worker ID
-    workerID = context.getTaskAttemptID().getTaskID().getId();
-    LOG.info("WORKER SETUP: " + workerID);
+    int taskID = context.getTaskAttemptID().getTaskID().getId();
+    LOG.info("Task ID " + taskID);
+    if (taskWorkerMap == null) {
+      workerID = taskID;
+    } else {
+      workerID = taskWorkerMap.get(taskID);
+    }
+    LOG.info("WORKER ID: " + workerID);
     // Get nodes file and initialize workers
-    BufferedReader br = getNodesReader(workerID, context);
+    BufferedReader br = getNodesReader(nodesFile, fs);
     try {
       workers = new Workers(br, workerID);
       br.close();
@@ -153,18 +203,28 @@ public class CollectiveMapper<KEYIN, VALUEIN, KEYOUT, VALUEOUT> extends
       throw new IOException(e);
     }
     receiver.start();
-    boolean success = CollCommWorker.masterBarrier(workers, workerData,
+    context.getProgress();
+    success = CollCommWorker.masterHandshake(workers, workerData,
       resourcePool);
     LOG.info("Barrier: " + success);
     return success;
   }
 
+  /**
+   * Get the ID of this worker.
+   * 
+   * @return Worker ID
+   */
   protected int getWorkerID() {
     return this.workerID;
   }
   
   protected boolean isMaster() {
     return this.workers.isMaster();
+  }
+  
+  protected boolean masterBarrier() {
+    return CollCommWorker.masterBarrier(workers, workerData, resourcePool);
   }
   
   protected <T, A extends Array<T>> boolean prmtvArrBcast(A array) {
@@ -176,6 +236,12 @@ public class CollectiveMapper<KEYIN, VALUEIN, KEYOUT, VALUEOUT> extends
     ArrTable<A, C> arrTable) {
     return CollCommWorker.arrTableBcast(arrTable, this.workers,
       this.workerData, this.resourcePool);
+  }
+  
+  protected <T, A extends Array<T>, C extends ArrCombiner<A>> boolean arrTableBcastTotalKnown(
+    ArrTable<A, C> arrTable, int numTotalPartitions) {
+    return CollCommWorker.arrTableBcastTotalKnown(arrTable, numTotalPartitions,
+      this.workers, this.workerData, this.resourcePool);
   }
   
   protected <P extends StructPartition, T extends StructTable<P>> boolean structTableBcast(
@@ -202,6 +268,17 @@ public class CollectiveMapper<KEYIN, VALUEIN, KEYOUT, VALUEOUT> extends
     ArrTable<A, C> table) {
     AllgatherWorker.allgather(workers, workerData, resourcePool, table);
   }
+
+  protected <A extends Array<?>, C extends ArrCombiner<A>> void allgatherOne(
+    ArrTable<A, C> table) throws Exception {
+    AllgatherWorker.allgatherOne(workers, workerData, resourcePool, table);
+  }
+
+  protected <A extends Array<?>, C extends ArrCombiner<A>> void allgatherTotalKnown(
+    ArrTable<A, C> table, int totalParRecv) throws Exception {
+    AllgatherWorker.allgatherTotalKnown(workers, workerData, resourcePool,
+      table, totalParRecv);
+  }
   
   protected <P extends StructPartition, T extends StructTable<P>, 
     I extends VertexID, M extends MsgVal> 
@@ -227,7 +304,18 @@ public class CollectiveMapper<KEYIN, VALUEIN, KEYOUT, VALUEOUT> extends
     GraphWorker.allgatherVtx(workers, workerData, resourcePool, table);
   }
   
+  public <P extends StructPartition, T extends StructTable<P>> void allgatherVtxTotalKnown(
+    T table, int totalNumPartitions) throws IOException {
+    GraphWorker.allgatherVtxTotalKnown(workers, workerData, resourcePool,
+      table, totalNumPartitions);
+  }
+  
   public <I, O, T extends Task<I, O>> List<O> doTasks(List<I> inputs,
+    String taskName, T task, int numThreads) {
+    return CollCommWorker.doTasks(inputs, taskName, task, numThreads);
+  }
+  
+  public <I, O, T extends Task<I, O>> List<O> doTasks(I[] inputs,
     String taskName, T task, int numThreads) {
     return CollCommWorker.doTasks(inputs, taskName, task, numThreads);
   }
@@ -244,6 +332,30 @@ public class CollectiveMapper<KEYIN, VALUEIN, KEYOUT, VALUEOUT> extends
 
   protected ResourcePool getResourcePool() {
     return this.resourcePool;
+  }
+  
+  protected void logMemUsage() {
+    LOG.info("Total Memory (bytes): " + " "
+      + Runtime.getRuntime().totalMemory() + ", Free Memory (bytes): "
+      + Runtime.getRuntime().freeMemory());
+  }
+
+  protected void logGCTime() {
+    long totalGarbageCollections = 0;
+    long garbageCollectionTime = 0;
+    for (GarbageCollectorMXBean gc : ManagementFactory
+      .getGarbageCollectorMXBeans()) {
+      long count = gc.getCollectionCount();
+      if (count >= 0) {
+        totalGarbageCollections += count;
+      }
+      long time = gc.getCollectionTime();
+      if (time >= 0) {
+        garbageCollectionTime += time;
+      }
+    }
+    LOG.info("Total Garbage Collections: " + totalGarbageCollections
+      + ", Total Garbage Collection Time (ms): " + garbageCollectionTime);
   }
 
   /**
@@ -290,9 +402,9 @@ public class CollectiveMapper<KEYIN, VALUEIN, KEYOUT, VALUEOUT> extends
     KeyValReader reader = new KeyValReader(context);
     try {
       mapCollective(reader, context);
-    } catch (Exception e) {
-      LOG.error("Fail to do map-collective.", e);
-      throw new IOException(e);
+    } catch (Throwable t) {
+      LOG.error("Fail to do map-collective.", t);
+      throw new IOException(t);
     } finally {
       cleanup(context);
       receiver.stop();

@@ -148,7 +148,5 @@ public class DataGen {
     System.out.println("Generating data..... ");
     generateVectors(numDataPoints, vectorSize, numPointFiles, localDir, fs,
       dataDir);
-    generateCentroids(numCentroids, vectorSize, configuration, cenDir, fs,
-      startJobID);
   }
 }

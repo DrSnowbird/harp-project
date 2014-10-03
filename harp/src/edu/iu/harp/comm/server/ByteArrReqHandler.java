@@ -16,8 +16,8 @@
 
 package edu.iu.harp.comm.server;
 
-import java.io.DataInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 
 import org.apache.log4j.Logger;
 
@@ -26,6 +26,7 @@ import edu.iu.harp.comm.Constants;
 import edu.iu.harp.comm.WorkerData;
 import edu.iu.harp.comm.data.ByteArray;
 import edu.iu.harp.comm.data.Commutable;
+import edu.iu.harp.comm.resource.DataDeserializer;
 import edu.iu.harp.comm.resource.ResourcePool;
 
 public class ByteArrReqHandler extends ReqHandler {
@@ -39,9 +40,9 @@ public class ByteArrReqHandler extends ReqHandler {
 
   @Override
   protected Commutable handleData(Connection conn) throws Exception {
-    DataInputStream din = conn.getDataInputDtream();
+    InputStream in = conn.getInputDtream();
     // Receive data
-    ByteArray byteArray = receiveByteArray(din);
+    ByteArray byteArray = receiveByteArray(in);
     // Close connection
     conn.close();
     // Process byte array
@@ -50,49 +51,69 @@ public class ByteArrReqHandler extends ReqHandler {
       data = processByteArray(byteArray);
     } catch (Exception e) {
       releaseBytes(byteArray.getArray());
+      releaseInts(byteArray.getMetaArray());
       throw e;
     }
     return data;
   }
 
-  private ByteArray receiveByteArray(DataInputStream din) throws IOException {
-    int size = din.readInt();
-    int metaDataSize = din.readInt();
-    int[] metaData = null;
-    if (metaDataSize > 0) {
-      // Meta data should be small, not managed by resource pool
-      metaData = new int[metaDataSize];
-      for (int i = 0; i < metaDataSize; i++) {
-        metaData[i] = din.readInt();
+  private ByteArray receiveByteArray(InputStream in) throws IOException {
+    // int size = din.readInt();
+    // int metaArraySize = din.readInt();
+    // Read array size and meta array size
+    byte[] sizeBytes = this.getResourcePool().getByteArrayPool().getArray(8);
+    in.read(sizeBytes);
+    DataDeserializer deserializer = new DataDeserializer(sizeBytes);
+    int size = deserializer.readInt();
+    int metaArraySize = deserializer.readInt();
+    this.getResourcePool().getByteArrayPool().releaseArrayInUse(sizeBytes);
+    // Read meta array
+    int[] metaArray = null;
+    if (metaArraySize > 0) {
+      metaArray = this.getResourcePool().getIntArrayPool()
+        .getArray(metaArraySize);
+      byte[] metaArrayBytes = this.getResourcePool().getByteArrayPool()
+        .getArray(4 * metaArraySize);
+      in.read(metaArrayBytes);
+      deserializer.setData(metaArrayBytes);
+      for (int i = 0; i < metaArraySize; i++) {
+        // metaArray[i] = din.readInt();
+        metaArray[i] = deserializer.readInt();
       }
+      this.getResourcePool().getByteArrayPool()
+        .releaseArrayInUse(metaArrayBytes);
     }
     // Prepare bytes from resource pool
-    byte[] bytes = this.getResourcePool().getByteArrayPool()
-      .getArray(size + Constants.SENDRECV_BYTE_UNIT);
-    try {
-      receiveBytes(din, bytes, size);
-    } catch (Exception e) {
-      releaseBytes(bytes);
-      throw e;
+    byte[] bytes = null;
+    // Sending or receiving null array is allowed
+    if (size > 0) {
+      bytes = this.getResourcePool().getByteArrayPool()
+        .getArray(size + Constants.SENDRECV_BYTE_UNIT);
+      try {
+        receiveBytes(in, bytes, size);
+      } catch (Exception e) {
+        releaseBytes(bytes);
+        releaseInts(metaArray);
+        throw e;
+      }
     }
-    ByteArray array = new ByteArray();
-    array.setArray(bytes);
-    array.setStart(0);
-    array.setSize(size);
-    array.setMetaData(metaData);
-    LOG.info("Byte array size: " + size + ", real size: " + bytes.length
-      + ", meta data size: " + metaDataSize);
-    return array;
+    ByteArray byteArray = new ByteArray();
+    byteArray.setArray(bytes);
+    byteArray.setStart(0);
+    byteArray.setSize(size);
+    byteArray.setMetaArray(metaArray);
+    byteArray.setMetaArraySize(metaArraySize);
+    return byteArray;
   }
 
-  private void receiveBytes(DataInputStream din, byte[] bytes, int size)
+  private void receiveBytes(InputStream in, byte[] bytes, int size)
     throws IOException {
     // Receive bytes data and process
     int recvLen = 0;
     int len = 0;
     while (recvLen < size) {
-      len = din.read(bytes, recvLen, Constants.SENDRECV_BYTE_UNIT);
-      recvLen = recvLen + len;
+      len = in.read(bytes, recvLen, Constants.SENDRECV_BYTE_UNIT);
+      recvLen += len;
       if (recvLen == size) {
         break;
       }
@@ -101,6 +122,10 @@ public class ByteArrReqHandler extends ReqHandler {
 
   private void releaseBytes(byte[] bytes) {
     this.getResourcePool().getByteArrayPool().releaseArrayInUse(bytes);
+  }
+
+  private void releaseInts(int[] ints) {
+    this.getResourcePool().getIntArrayPool().releaseArrayInUse(ints);
   }
 
   protected Commutable processByteArray(ByteArray array) throws Exception {

@@ -71,8 +71,8 @@ public class StructParCatcher<P extends StructPartition, T extends StructTable<P
       }
       // Get the byte array
       ByteArray byteArray = (ByteArray) data;
-      int[] metaData = byteArray.getMetaData();
-      int workerID = metaData[0];
+      int[] metaArray = byteArray.getMetaArray();
+      int workerID = metaArray[0];
       // Continue sending to your next neighbor
       if (workerID != this.workers.getNextID()) {
         ByteArrReqSender byteArraySender = new ByteArrReqSender(workers

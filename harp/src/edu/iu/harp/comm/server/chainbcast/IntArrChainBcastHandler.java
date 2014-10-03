@@ -37,6 +37,7 @@ public class IntArrChainBcastHandler extends ByteArrChainBcastHandler {
     IntArray intArray = IntArrReqHandler.deserializeBytesToIntArray(
       byteArray.getArray(), this.getResourcePool());
     // If success, release bytes
+    // Meta array doesn't exist in broadcasting int array
     this.getResourcePool().getByteArrayPool()
       .releaseArrayInUse(byteArray.getArray());
     return intArray;

@@ -49,7 +49,8 @@ public class IntArrReqSender extends ByteArrReqSender {
     }
     ByteArray byteArray = new ByteArray();
     byteArray.setArray(bytes);
-    byteArray.setMetaData(null);
+    byteArray.setMetaArray(null);
+    byteArray.setMetaArraySize(0);
     byteArray.setSize(size);
     byteArray.setStart(0);
     return byteArray;

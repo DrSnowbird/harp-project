@@ -16,6 +16,7 @@
 
 package edu.iu.harp.collective;
 
+import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 
 import java.io.File;
@@ -66,6 +67,7 @@ import edu.iu.harp.comm.data.IntArray;
 import edu.iu.harp.comm.data.StructObject;
 import edu.iu.harp.comm.data.WritableObject;
 import edu.iu.harp.comm.request.AllbcastReq;
+import edu.iu.harp.comm.request.AllgatherReq;
 import edu.iu.harp.comm.request.ChainBcastAck;
 import edu.iu.harp.comm.request.ReqAck;
 import edu.iu.harp.comm.resource.ResourcePool;
@@ -75,9 +77,8 @@ import edu.iu.harp.graph.vtx.StructTable;
 public class CollCommWorker {
   /** Class logger */
   protected static final Logger LOG = Logger.getLogger(CollCommWorker.class);
-  
-  private static ExecutorService taskExecutor = null;
-  private static int threadsNum = 1;
+
+  private static ExecutorService taskExecutor = Executors.newCachedThreadPool();
 
   /**
    * It seems that the logger you get in static field can be re-initialized
@@ -103,7 +104,7 @@ public class CollCommWorker {
   }
 
   /**
-   * Master side barrier, master decides if it can lead the system to the next
+   * Master side handshake, master decides if it can lead the system to the next
    * stage, if no, it stops. A slave may get the wrong view of the barrier.But
    * as long as it doesn;t any command in future, it can stop itself.
    * 
@@ -112,8 +113,12 @@ public class CollCommWorker {
    * @param resourcePool
    * @return
    */
-  public static boolean masterBarrier(Workers workers, WorkerData workerData,
+  public static boolean masterHandshake(Workers workers, WorkerData workerData,
     ResourcePool resourcePool) {
+    if(workers.getNumWorkers() == 1) {
+      return true;
+    }
+    boolean success = true;
     // Do three handshakes
     if (workers.isMaster()) {
       // Initialize counter
@@ -133,7 +138,7 @@ public class CollCommWorker {
         WorkerInfo worker = queue.poll();
         ReqSender sender = new StructObjReqSender(worker.getNode(),
           worker.getPort(), barrier, resourcePool);
-        boolean success = sender.execute();
+        success = sender.execute();
         // Retry
         if (!success && counter[worker.getID()] < Constants.RETRY_COUNT) {
           queue.add(worker);
@@ -143,6 +148,11 @@ public class CollCommWorker {
           } catch (InterruptedException e) {
             LOG.error("Error in thread sleep.", e);
           }
+        } else if (counter[worker.getID()] == Constants.RETRY_COUNT) {
+          // Release before return
+          resourcePool.getWritableObjectPool().releaseWritableObjectInUse(
+            barrier);
+          return false;
         }
       }
       resourcePool.getWritableObjectPool().releaseWritableObjectInUse(barrier);
@@ -166,6 +176,7 @@ public class CollCommWorker {
       Barrier barrier = (Barrier) workerData
         .waitAndGetCommData(Constants.DATA_MAX_WAIT_TIME);
       if (barrier != null) {
+        LOG.info("Barrier: Send worker status. " + workers.getSelfID());
         resourcePool.getWritableObjectPool()
           .releaseWritableObjectInUse(barrier);
         WorkerStatus status = (WorkerStatus) resourcePool
@@ -174,7 +185,7 @@ public class CollCommWorker {
         status.setWorkerID(workers.getSelfID());
         ReqSender sender = new StructObjReqSender(workers.getMasterInfo()
           .getNode(), workers.getMasterInfo().getPort(), status, resourcePool);
-        boolean success = sender.execute();
+        success = sender.execute();
         resourcePool.getWritableObjectPool().releaseWritableObjectInUse(status);
         if (!success) {
           return false;
@@ -182,16 +193,107 @@ public class CollCommWorker {
       }
     }
     // Third handshake
-    Barrier[] barrierRef = new Barrier[1];
     Barrier barrier = null;
     if (workers.isMaster()) {
       barrier = (Barrier) resourcePool.getWritableObjectPool()
         .getWritableObject(Barrier.class.getName());
-      barrierRef[0] = barrier;
+      try {
+        ChainBcastMaster bcastDriver = new StructObjChainBcastMaster(barrier,
+          workers, resourcePool);
+        success = bcastDriver.execute();
+        resourcePool.getWritableObjectPool()
+          .releaseWritableObjectInUse(barrier);
+        if (!success) {
+          return false;
+        }
+      } catch (Exception e) {
+        LOG.error("EXCEPTION IN BCAST BARRIER.", e);
+        return false;
+      }
+    } else {
+      // Wait for data
+      barrier = CommUtil.waitAndGet(workerData, Barrier.class,
+        Constants.DATA_MAX_WAIT_TIME, 500);
+      if (barrier == null) {
+        LOG.error("No BARRIER RECV AFTER MAX WAIT TIME.");
+        return false;
+      }
+      resourcePool.getWritableObjectPool().releaseWritableObjectInUse(barrier);
     }
-    boolean success = chainBcast(barrierRef, workers, workerData, resourcePool);
-    resourcePool.getWritableObjectPool().releaseWritableObjectInUse(barrier);
     return success;
+  }
+  
+  /**
+   * Barrier at master side
+   * 
+   * @param workers
+   * @param workerData
+   * @param resourcePool
+   * @return
+   */
+  public static boolean masterBarrier(Workers workers, WorkerData workerData,
+    ResourcePool resourcePool) {
+    // do collect first
+    boolean success = true;
+    if(workers.getNumWorkers() == 1) {
+      return success;
+    }
+    if (workers.isMaster()) {
+      int numWorkers = workers.getNumWorkers();
+      for (int i = 1; i < numWorkers; i++) {
+        WorkerStatus status = 
+        CommUtil.waitAndGet(workerData, WorkerStatus.class,
+          Constants.DATA_MAX_WAIT_TIME, 100);
+        if (status != null) {
+          resourcePool.getWritableObjectPool().releaseWritableObjectInUse(
+            status);
+        } else {
+          return false;
+        }
+      }
+    } else {
+      WorkerStatus status = (WorkerStatus) resourcePool
+        .getWritableObjectPool().getWritableObject(
+          WorkerStatus.class.getName());
+      status.setWorkerID(workers.getSelfID());
+      StructObjReqSender sender = new StructObjReqSender(workers
+        .getMasterInfo().getNode(), workers.getMasterInfo().getPort(), status,
+        resourcePool);
+      success = sender.execute();
+      resourcePool.getWritableObjectPool().releaseWritableObjectInUse(status);
+      if (!success) {
+        return false;
+      }
+    }
+    // then bcast
+    Barrier barrier = null;
+    if (workers.isMaster()) {
+      barrier = (Barrier) resourcePool.getWritableObjectPool()
+        .getWritableObject(Barrier.class.getName());
+      try {
+        ChainBcastMaster bcastDriver = new StructObjChainBcastMaster(barrier,
+          workers, resourcePool);
+        success = bcastDriver.execute();
+        resourcePool.getWritableObjectPool()
+          .releaseWritableObjectInUse(barrier);
+        if (!success) {
+          return false;
+        }
+      } catch (Exception e) {
+        LOG.error("EXCEPTION IN BCAST BARRIER.", e);
+        return false;
+      }
+    } else {
+      // Wait for data
+      barrier = CommUtil.waitAndGet(workerData, Barrier.class,
+        Constants.DATA_MAX_WAIT_TIME, 500);
+      if (barrier == null) {
+        LOG.error("No BARRIER RECV AFTER MAX WAIT TIME.");
+        return false;
+      }
+      resourcePool.getWritableObjectPool().releaseWritableObjectInUse(barrier);
+    }
+    return true;
   }
 
   /**
@@ -327,6 +429,52 @@ public class CollCommWorker {
     }
   }
 
+  public static <T, A extends Array<T>, C extends ArrCombiner<A>> boolean arrTableBcastTotalKnown(
+    ArrTable<A, C> table, int totalPartitions, Workers workers,
+    WorkerData workerData, ResourcePool resourcePool) {
+    if (workers.getNumWorkers() == 1) {
+      return true;
+    }
+    if (workers.isMaster()) {
+      Class<A> aClass = table.getAClass();
+      ChainBcastMaster bcastDriver;
+      try {
+        if (aClass.equals(DoubleArray.class)) {
+          ArrPartition<A>[] partitions = table.getPartitions();
+          for (ArrPartition<A> partition : partitions) {
+            ArrPartition<DoubleArray> dblPar = (ArrPartition<DoubleArray>) partition;
+            bcastDriver = new DblArrParBcastMaster(dblPar, workers,
+              resourcePool);
+            bcastDriver.execute();
+          }
+        } else {
+          LOG.error("Fail to get bcast array table: " + aClass.getName());
+        }
+      } catch (Exception e) {
+        LOG.error("Exception in bcasting array table.", e);
+      }
+      ChainBcastAck ack = CommUtil.waitAndGet(workerData, ChainBcastAck.class,
+        Constants.DATA_MAX_WAIT_TIME, 100);
+      if (ack != null) {
+        resourcePool.getWritableObjectPool().releaseWritableObjectInUse(ack);
+        return true;
+      } else {
+        LOG.error("No Bcast ACK after MAX WAIT TIME.");
+      }
+      return false;
+    } else {
+      ArrTableBcastSlave<A, C> slave = new ArrTableBcastSlave<A, C>(workers,
+        workerData, resourcePool, totalPartitions, table,
+        Constants.NUM_DESERIAL_THREADS);
+      boolean success = slave.waitAndGet();
+      if (success && workers.isMax()) {
+        ChainBcastSlave.sendACK(workers.getMasterInfo().getNode(), workers
+          .getMasterInfo().getPort());
+      }
+      return success;
+    }
+  }
+
   public static <P extends StructPartition, T extends StructTable<P>> boolean structTableBcast(
     T table, Workers workers, WorkerData workerData, ResourcePool resourcePool) {
     if (workers.getNumWorkers() == 1) {
@@ -342,8 +490,8 @@ public class CollCommWorker {
       AllbcastReq.class);
     allbcastReq = allbcastReqRef[0];
     int totalPartitions = allbcastReq.getTotalRecvParNum();
-    resourcePool.getWritableObjectPool()
-      .releaseWritableObjectInUse(allbcastReq);
+    // Try to free the object but not cache
+    resourcePool.getWritableObjectPool().freeWritableObjectInUse(allbcastReq);
     LOG.info("Total struct partitions to receive in Allbcast: "
       + totalPartitions);
     if (workers.isMaster()) {
@@ -362,7 +510,7 @@ public class CollCommWorker {
         LOG.error("Exception in bcasting struct table.", e);
       }
       ChainBcastAck ack = CommUtil.waitAndGet(workerData, ChainBcastAck.class,
-        Constants.DATA_MAX_WAIT_TIME, 100);
+        Constants.DATA_MAX_WAIT_TIME, 500);
       if (ack != null) {
         resourcePool.getWritableObjectPool().releaseWritableObjectInUse(ack);
         return true;
@@ -422,7 +570,11 @@ public class CollCommWorker {
             (ChainBcastAck) data);
           return true;
         } else {
-          LOG.info("IRRELEVANT data: " + data.getClass().getName());
+          LOG.info("IRRELEVANT ACK data: " + data.getClass().getName());
+          if (data instanceof WorkerStatus) {
+            LOG.info("IRRELEVANT Worker Stauts: "
+              + ((WorkerStatus) data).getWorkerID());
+          }
         }
       } else {
         LOG.info("No Bcast ACK after MAX WAIT TIME.");
@@ -448,6 +600,16 @@ public class CollCommWorker {
     }
   }
 
+  /**
+   * There is no reply form the max worker in req chainbcast
+   * 
+   * @param dataRef
+   * @param workers
+   * @param workerData
+   * @param resourcePool
+   * @param sClass
+   * @return
+   */
   protected static <S extends StructObject> boolean reqChainBcast(S[] dataRef,
     Workers workers, WorkerData workerData, ResourcePool resourcePool,
     Class<S> sClass) {
@@ -457,7 +619,10 @@ public class CollCommWorker {
       try {
         bcastDriver = new StructObjChainBcastMaster(sendData, workers,
           resourcePool);
-        bcastDriver.execute();
+        boolean success = bcastDriver.execute();
+        if (!success) {
+          return false;
+        }
       } catch (Exception e) {
         LOG.error("Exception in bcasting data.", e);
         return false;
@@ -465,12 +630,10 @@ public class CollCommWorker {
       return true;
     } else {
       // Wait for data
-      // (for potential out of synchronization)
-      LOG.error("START WAITING FOR BCAST REQ.");
       dataRef[0] = CommUtil.waitAndGet(workerData, sClass,
         Constants.DATA_MAX_WAIT_TIME, 500);
       if (dataRef[0] == null) {
-        LOG.error("No REQ AFTER MAX WAIT TIME.");
+        LOG.error("No BCAST REQ AFTER MAX WAIT TIME.");
         return false;
       }
       return true;
@@ -482,7 +645,7 @@ public class CollCommWorker {
     WorkerData workerData, S sendData, S[][] gatheredDataRef,
     ResourcePool resourcePool) {
     if (workers.isMaster()) {
-      long time1 = System.currentTimeMillis();
+      // long time1 = System.currentTimeMillis();
       // Bcast barrier
       Barrier barrier = (Barrier) resourcePool.getWritableObjectPool()
         .getWritableObject(Barrier.class.getName());
@@ -493,8 +656,8 @@ public class CollCommWorker {
       } catch (Exception e) {
         LOG.error("Error when initializing bcast.", e);
       }
-      long time2 = System.currentTimeMillis();
-      LOG.info("Gather Data Barrier: " + (time2 - time1));
+      // long time2 = System.currentTimeMillis();
+      // LOG.info("Gather Data Barrier: " + (time2 - time1));
       resourcePool.getWritableObjectPool().releaseWritableObjectInUse(barrier);
       int numWorkers = workers.getNumWorkers();
       S[] gatheredData = (S[]) java.lang.reflect.Array.newInstance(
@@ -504,7 +667,7 @@ public class CollCommWorker {
       gatheredData[count] = sendData;
       count++;
       while (count < numWorkers) {
-        long time3 = System.currentTimeMillis();
+        // long time3 = System.currentTimeMillis();
         Commutable data = workerData
           .waitAndGetCommData(Constants.DATA_MAX_WAIT_TIME);
         if (data == null) {
@@ -517,8 +680,8 @@ public class CollCommWorker {
           LOG.error("IRRELEVANT receiving data in gather: "
             + data.getClass().getName());
         }
-        long time4 = System.currentTimeMillis();
-        LOG.info("Gather Data Per Wait: " + (time4 - time3));
+        // long time4 = System.currentTimeMillis();
+        // LOG.info("Gather Data Per Wait: " + (time4 - time3));
       }
       return true;
     } else {
@@ -556,6 +719,7 @@ public class CollCommWorker {
     WorkerData workerData, S sendData, S[][] gatheredDataRef,
     ResourcePool resourcePool) {
     if (workers.isMaster()) {
+      long time1 = System.currentTimeMillis();
       int numWorkers = workers.getNumWorkers();
       S[] gatheredData = (S[]) java.lang.reflect.Array.newInstance(
         sendData.getClass(), numWorkers);
@@ -574,6 +738,8 @@ public class CollCommWorker {
           return false;
         }
       }
+      long time2 = System.currentTimeMillis();
+      LOG.info("Collect Wait: " + (time2 - time1));
       return true;
     } else {
       StructObjReqSender sender = new StructObjReqSender(workers
@@ -623,6 +789,12 @@ public class CollCommWorker {
 
   public static <I, O, T extends Task<I, O>> List<O> doTasks(List<I> inputs,
     String taskName, T task, int numThreads) {
+    if(inputs.size() == 0) {
+      return null;
+    }
+    if (numThreads == 0) {
+      numThreads = Runtime.getRuntime().availableProcessors();
+    }
     if (numThreads > inputs.size()) {
       numThreads = inputs.size();
     }
@@ -630,23 +802,16 @@ public class CollCommWorker {
     for (I input : inputs) {
       queue.add(input);
     }
-    List<TaskCallable<I, O, T>> tasks = new ArrayList<TaskCallable<I, O, T>>();
+    List<TaskCallable<I, O, T>> tasks = new ObjectArrayList<TaskCallable<I, O, T>>(
+      numThreads);
     for (int i = 0; i < numThreads; i++) {
       TaskCallable<I, O, T> taskCallable = new TaskCallable<I, O, T>(queue,
         task, i);
       tasks.add(taskCallable);
     }
-    // Initialize executor
-    ExecutorService taskExecutor = null;
-    if (numThreads > 1) {
-      taskExecutor = Executors.newFixedThreadPool(numThreads);
-    } else if (numThreads == 1) {
-      taskExecutor = Executors.newSingleThreadExecutor();
-    } else {
-      return null;
-    }
     // Execute
-    Set<Future<Result<O>>> futureSet = new ObjectOpenHashSet<Future<Result<O>>>();
+    Set<Future<Result<O>>> futureSet = new ObjectOpenHashSet<Future<Result<O>>>(
+      numThreads);
     Set<Result<O>> rSet = new ObjectOpenHashSet<Result<O>>(numThreads);
     for (int i = 0; i < tasks.size(); i++) {
       Future<Result<O>> future = taskExecutor.submit(tasks.get(i));
@@ -663,61 +828,85 @@ public class CollCommWorker {
         break;
       }
     }
-    // Shutdown
-    CommUtil.closeExecutor(taskExecutor, taskName);
     if (!success) {
       return null;
     }
-    List<O> output = new ArrayList<O>();
+    List<O> output = new ObjectArrayList<O>(inputs.size());
     for (Result<O> result : rSet) {
       output.addAll(result.getDataList());
     }
     return output;
   }
-  
-  public static <I, O, T extends Task<I, O>> Set<O> doTasksReturnSet(
-    List<I> inputs, String taskName, T task, int numThreads) {
-    if (numThreads > inputs.size()) {
-      numThreads = inputs.size();
+
+  public static <I, O, T extends Task<I, O>> List<O> doTasks(I[] inputs,
+    String taskName, T task, int numThreads) {
+    if (inputs.length == 0) {
+      return null;
     }
-    final BlockingQueue<I> queue = new ArrayBlockingQueue<I>(inputs.size());
+    if (numThreads == 0) {
+      numThreads = Runtime.getRuntime().availableProcessors();
+    }
+    if (numThreads > inputs.length) {
+      numThreads = inputs.length;
+    }
+    final BlockingQueue<I> queue = new ArrayBlockingQueue<I>(inputs.length);
     for (I input : inputs) {
       queue.add(input);
     }
-    List<TaskCallable<I, O, T>> tasks = new ArrayList<TaskCallable<I, O, T>>();
+    List<TaskCallable<I, O, T>> tasks = new ObjectArrayList<TaskCallable<I, O, T>>(
+      numThreads);
     for (int i = 0; i < numThreads; i++) {
       TaskCallable<I, O, T> taskCallable = new TaskCallable<I, O, T>(queue,
         task, i);
       tasks.add(taskCallable);
     }
-    // Initialize executor
-    /*
-    ExecutorService taskExecutor = null;
-    if (numThreads > 1) {
-      taskExecutor = Executors.newFixedThreadPool(numThreads);
-    } else if (numThreads == 1) {
-      taskExecutor = Executors.newSingleThreadExecutor();
-    } else {
-      return null;
+    // Execute
+    Set<Future<Result<O>>> futureSet = new ObjectOpenHashSet<Future<Result<O>>>(
+      numThreads);
+    Set<Result<O>> rSet = new ObjectOpenHashSet<Result<O>>(numThreads);
+    for (int i = 0; i < tasks.size(); i++) {
+      Future<Result<O>> future = taskExecutor.submit(tasks.get(i));
+      futureSet.add(future);
     }
-    */
-    /*
-    if(taskExecutor == null || threadsNum != numThreads) {
-      if (numThreads > 1) {
-        taskExecutor = Executors.newFixedThreadPool(numThreads);
-        threadsNum = numThreads;
-      } else if (numThreads == 1) {
-        taskExecutor = Executors.newSingleThreadExecutor();
-        threadsNum = numThreads;
-      } else {
-        return null;
+    // Get result
+    boolean success = true;
+    for (Future<Result<O>> future : futureSet) {
+      try {
+        rSet.add(future.get());
+      } catch (InterruptedException | ExecutionException e) {
+        LOG.error("Error to collect output data.", e);
+        success = false;
+        break;
       }
     }
-    */
-    if (taskExecutor == null) {
-      taskExecutor = Executors.newCachedThreadPool();
+    if (!success) {
+      return null;
     }
-    
+    List<O> output = new ObjectArrayList<O>(inputs.length);
+    for (Result<O> result : rSet) {
+      output.addAll(result.getDataList());
+    }
+    return output;
+  }
+
+  public static <I, O, T extends Task<I, O>> Set<O> doTasksReturnSet(
+    List<I> inputs, String taskName, T task, int numThreads) {
+    if (numThreads > inputs.size()) {
+      numThreads = inputs.size();
+    }
+    if (numThreads == 0) {
+      return new HashSet<O>();
+    }
+    final BlockingQueue<I> queue = new ArrayBlockingQueue<I>(inputs.size());
+    for (I input : inputs) {
+      queue.add(input);
+    }
+    List<TaskCallable<I, O, T>> tasks = new ObjectArrayList<TaskCallable<I, O, T>>();
+    for (int i = 0; i < numThreads; i++) {
+      TaskCallable<I, O, T> taskCallable = new TaskCallable<I, O, T>(queue,
+        task, i);
+      tasks.add(taskCallable);
+    }
     // Execute
     Set<Future<Result<O>>> futureSet = new ObjectOpenHashSet<Future<Result<O>>>();
     Set<Result<O>> rSet = new ObjectOpenHashSet<Result<O>>(numThreads);
@@ -736,9 +925,6 @@ public class CollCommWorker {
         break;
       }
     }
-    // Shutdown
-    // CommUtil.closeExecutor(taskExecutor, taskName);
-    // LOG.info("Executor is closed.");
     if (!success) {
       return null;
     }
@@ -748,7 +934,7 @@ public class CollCommWorker {
     }
     return output;
   }
-  
+
   public static <I, O, T extends Task<I, O>> Set<O> doThreadTasks(
     List<I> inputs, String taskName, T task, int numThreads) {
     if (numThreads > inputs.size()) {
@@ -758,7 +944,7 @@ public class CollCommWorker {
     for (I input : inputs) {
       queue.add(input);
     }
-    List<TaskCallable<I, O, T>> tasks = new ArrayList<TaskCallable<I, O, T>>();
+    List<TaskCallable<I, O, T>> tasks = new ObjectArrayList<TaskCallable<I, O, T>>();
     for (int i = 0; i < numThreads; i++) {
       TaskCallable<I, O, T> taskCallable = new TaskCallable<I, O, T>(queue,
         task, i);

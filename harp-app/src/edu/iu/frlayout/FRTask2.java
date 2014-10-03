@@ -22,42 +22,44 @@ import org.apache.log4j.Logger;
 
 import edu.iu.harp.collective.Task;
 import edu.iu.harp.graph.EdgePartition;
-import edu.iu.harp.graph.LongVertexID;
+import edu.iu.harp.graph.IntVertexID;
 import edu.iu.harp.graph.NullEdgeVal;
-import edu.iu.harp.graph.vtx.LongDblArrVtxTable;
+import edu.iu.harp.graph.vtx.IntFltArrVtxTable;
 
 public class FRTask2 extends
-  Task<EdgePartition<LongVertexID, NullEdgeVal>, Null> {
+  Task<EdgePartition<IntVertexID, NullEdgeVal>, Null> {
 
   /** Class logger */
   private static final Logger LOG = Logger.getLogger(FRTask2.class);
-  
-  private LongDblArrVtxTable allGraphLayout;
-  private LongDblArrVtxTable sgDisps;
-  private Random r;
-  private double k;
 
-  public FRTask2(LongDblArrVtxTable graphLayout, LongDblArrVtxTable disps,
+  private IntFltArrVtxTable allGraphLayout;
+  private IntFltArrVtxTable sgDisps;
+  private float k;
+
+  public FRTask2(IntFltArrVtxTable graphLayout, IntFltArrVtxTable disps,
     double k, double area) {
     allGraphLayout = graphLayout;
     sgDisps = disps;
-    r = new Random();
-    this.k = k;
+    this.k = (float) k;
   }
 
   @Override
-  public Null run(EdgePartition<LongVertexID, NullEdgeVal> partition)
+  public Null run(EdgePartition<IntVertexID, NullEdgeVal> partition)
     throws Exception {
-    double[] sgDblArr = null;
-    double[] glDblArr1 = null;
-    double[] glDblArr2 = null;
-    double xd;
-    double yd;
-    double ded;
-    double af;
-    LongVertexID srcID = null;
-    LongVertexID tgtID = null;
+    float k = (float) this.k;
+    float[] sgDblArr = null;
+    float[] glDblArr1 = null;
+    float[] glDblArr2 = null;
+    float xd;
+    float yd;
+    float ded;
+    float af;
+    IntVertexID srcID = null;
+    IntVertexID tgtID = null;
+    Random r = new Random();
     while (partition.nextEdge()) {
+      // Here is to reduce the number of times to fetch glDblArr1 from
+      // allGraphLayout
       if (srcID == null) {
         srcID = partition.getCurSourceID();
         glDblArr1 = allGraphLayout.getVertexVal(srcID.getVertexID());
@@ -76,23 +78,19 @@ public class FRTask2 extends
       }
       xd = glDblArr1[0] - glDblArr2[0];
       yd = glDblArr1[1] - glDblArr2[1];
-      ded = Math.sqrt(xd * xd + yd * yd);
+      ded = (float) (Math.sqrt(xd * xd + yd * yd));
       af = 0;
       // The partition layout between edge partition and sgDisps
       // should be the same, no synchronization
       sgDblArr = sgDisps.getVertexVal(srcID.getVertexID());
       if (ded != 0) {
-        /*
-         * xd /= ded; yd /= ded; af = ded * ded / k; disps[m][0] -= xd * af;
-         * disps[m][1] -= yd * af;
-         */
         af = ded / k;
         sgDblArr[0] -= xd * af;
         sgDblArr[1] -= yd * af;
       } else {
-        xd = r.nextGaussian() * 0.1;
-        yd = r.nextGaussian() * 0.1;
-        af = r.nextGaussian() * 0.1;
+        xd = (float) (r.nextGaussian() * 0.1);
+        yd = (float) (r.nextGaussian() * 0.1);
+        af = (float) (r.nextGaussian() * 0.1);
         sgDblArr[0] -= xd * af;
         sgDblArr[1] -= yd * af;
       }

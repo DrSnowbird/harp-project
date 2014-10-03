@@ -16,9 +16,9 @@
 
 package edu.iu.harp.comm.server;
 
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.concurrent.ExecutorService;
@@ -37,7 +37,6 @@ import edu.iu.harp.comm.server.chainbcast.ByteArrChainBcastHandler;
 import edu.iu.harp.comm.server.chainbcast.ChainBcastHandler;
 import edu.iu.harp.comm.server.chainbcast.DoubleArrChainBcastHandler;
 import edu.iu.harp.comm.server.chainbcast.IntArrChainBcastHandler;
-import edu.iu.harp.comm.server.chainbcast.IntArrChainBcastHandlerAlt;
 import edu.iu.harp.comm.server.chainbcast.StructObjChainBcastHandler;
 import edu.iu.harp.comm.server.chainbcast.WritableObjChainBcastHandler;
 
@@ -58,7 +57,7 @@ public class Receiver implements Runnable {
   private final String node;
   private final int port;
   /** Server socket */
-  private ServerSocket serverSocket;
+  private final ServerSocket serverSocket;
 
   public Receiver(WorkerData data, ResourcePool pool, Workers workers,
     String node, int port, int threads) throws Exception {
@@ -71,9 +70,9 @@ public class Receiver implements Runnable {
     this.node = node;
     this.port = port;
     // Server socket
-    serverSocket = null;
     try {
       serverSocket = new ServerSocket(this.port);
+      serverSocket.setReuseAddress(true);
     } catch (Exception e) {
       LOG.error("Error in starting receiver.", e);
       throw new Exception(e);
@@ -100,12 +99,12 @@ public class Receiver implements Runnable {
         // socket.setReceiveBufferSize(128 * 1024);
         // LOG.info("ReceiveBufferSize: " + socket.getReceiveBufferSize()
         // + " SendBufferSize: " + socket.getSendBufferSize());
-        DataOutputStream dout = new DataOutputStream(socket.getOutputStream());
-        DataInputStream din = new DataInputStream(socket.getInputStream());
+        OutputStream out = socket.getOutputStream();
+        InputStream in = socket.getInputStream();
         // Receiver connection
-        Connection conn = new Connection(this.node, this.port, dout, din,
-          socket);
-        byte commType = din.readByte();
+        Connection conn = new Connection(this.node, this.port, out, in, socket);
+        // All commands should use positive byte integer 0 ~ 127
+        byte commType = (byte) in.read();
         if (commType == Constants.RECEIVER_QUIT_REQUEST) {
           conn.close();
           break;
@@ -124,11 +123,6 @@ public class Receiver implements Runnable {
             this.workerData, this.pool, conn, this.workers,
             Constants.BYTE_ARRAY_CHAIN_BCAST);
           handlerExecutor.execute(handler);
-        } else if (commType == Constants.INT_ARRAY_CHAIN_BCAST_ALT) {
-          ChainBcastHandler handler = new IntArrChainBcastHandlerAlt(
-            this.workerData, this.pool, conn, this.workers,
-            Constants.INT_ARRAY_CHAIN_BCAST_ALT);
-          handlerExecutor.execute(handler);
         } else if (commType == Constants.INT_ARRAY_CHAIN_BCAST) {
           ChainBcastHandler handler = new IntArrChainBcastHandler(
             this.workerData, this.pool, conn, this.workers,
@@ -138,10 +132,6 @@ public class Receiver implements Runnable {
           ChainBcastHandler handler = new DoubleArrChainBcastHandler(
             this.workerData, this.pool, conn, this.workers,
             Constants.DOUBLE_ARRAY_CHAIN_BCAST);
-          handlerExecutor.execute(handler);
-        } else if (commType == Constants.WRITABLE_OBJ_REQUEST_ALT) {
-          ReqHandler handler = new WritableObjReqHandlerAlt(this.workerData,
-            this.pool, conn);
           handlerExecutor.execute(handler);
         } else if (commType == Constants.WRITABLE_OBJ_REQUEST) {
           ReqHandler handler = new WritableObjReqHandler(this.workerData,

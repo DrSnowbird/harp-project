@@ -33,6 +33,11 @@ public class DataSerializer implements DataOutput {
     this.bytes = bytes;
     this.pos = pos;
   }
+  
+  public void setData(byte[] bytes) {
+    this.bytes = bytes;
+    this.pos = 0;
+  }
 
   @Override
   public void write(int b) throws IOException {

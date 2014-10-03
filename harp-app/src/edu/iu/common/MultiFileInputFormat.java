@@ -20,7 +20,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Random;
 import java.util.Set;
 
 import org.apache.commons.logging.Log;
@@ -57,7 +56,7 @@ public class MultiFileInputFormat extends FileInputFormat<String, String> {
     long length = 0;
     List<Path> pathList = null;
     Set<String> hostSet = null;
-    Random random = new Random(System.nanoTime());
+    // Random random = new Random(System.nanoTime());
     for (FileStatus file : files) {
       if (tmp == 0) {
         pathList = new ArrayList<Path>();

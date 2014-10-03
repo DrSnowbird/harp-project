@@ -16,9 +16,9 @@
 
 package edu.iu.harp.comm;
 
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
@@ -28,8 +28,8 @@ public class Connection {
 
   private String node;
   private int port;
-  private DataOutputStream dout;
-  private DataInputStream din;
+  private OutputStream out;
+  private InputStream in;
   private Socket socket;
 
   /**
@@ -49,8 +49,8 @@ public class Connection {
       this.socket = new Socket();
       int timeoutMs = timeOutMs;
       this.socket.connect(sockaddr, timeoutMs);
-      this.dout = new DataOutputStream(socket.getOutputStream());
-      this.din = new DataInputStream(socket.getInputStream());
+      this.out = socket.getOutputStream();
+      this.in = socket.getInputStream();
     } catch (Exception e) {
       this.close();
       throw e;
@@ -60,17 +60,17 @@ public class Connection {
   /**
    * Connection as a server
    * 
-   * @param dout
-   * @param din
+   * @param out
+   * @param in
    * @param socket
    */
-  public Connection(String node, int port, DataOutputStream dout,
-    DataInputStream din, Socket socket) {
+  public Connection(String node, int port, OutputStream out, InputStream in,
+    Socket socket) {
     this.node = node;
     this.port = port;
     this.socket = socket;
-    this.din = din;
-    this.dout = dout;
+    this.in = in;
+    this.out = out;
   }
 
   public String getNode() {
@@ -81,24 +81,24 @@ public class Connection {
     return this.port;
   }
 
-  public DataOutputStream getDataOutputStream() {
-    return this.dout;
+  public OutputStream getOutputStream() {
+    return this.out;
   }
 
-  public DataInputStream getDataInputDtream() {
-    return this.din;
+  public InputStream getInputDtream() {
+    return this.in;
   }
 
   public void close() {
     try {
-      if (dout != null) {
-        dout.close();
+      if (out != null) {
+        out.close();
       }
     } catch (IOException e) {
     }
     try {
-      if (din != null) {
-        din.close();
+      if (in != null) {
+        in.close();
       }
     } catch (IOException e) {
     }
@@ -108,8 +108,8 @@ public class Connection {
       }
     } catch (IOException e) {
     }
-    this.dout = null;
-    this.din = null;
+    this.out = null;
+    this.in = null;
     this.socket = null;
   }
 }

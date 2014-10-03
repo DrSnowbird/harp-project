@@ -35,11 +35,13 @@ public class ArrDeserialTask<A extends Array<?>> extends
 
   @Override
   public ArrPartition<A> run(ByteArray byteArray) throws Exception {
-    int partitionID = byteArray.getMetaData()[0];
+    int partitionID = byteArray.getMetaArray()[0];
     A array = ArrParGetter.desiealizeToArray(byteArray, resourcePool, aClass);
     if (array != null) {
       ArrPartition<A> partition = new ArrPartition<A>(array, partitionID);
       resourcePool.getByteArrayPool().releaseArrayInUse(byteArray.getArray());
+      resourcePool.getIntArrayPool()
+        .releaseArrayInUse(byteArray.getMetaArray());
       return partition;
     }
     return null;

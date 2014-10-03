@@ -16,6 +16,8 @@
 
 package edu.iu.harp.comm.client.regroup;
 
+import org.apache.log4j.Logger;
+
 import edu.iu.harp.arrpar.ArrPartition;
 import edu.iu.harp.comm.CommUtil;
 import edu.iu.harp.comm.WorkerData;
@@ -28,6 +30,9 @@ import edu.iu.harp.comm.server.DoubleArrReqHandler;
 import edu.iu.harp.comm.server.IntArrReqHandler;
 
 public class ArrParGetter<A extends Array<?>> {
+  
+  /** Class logger */
+  protected static final Logger LOG = Logger.getLogger(ArrParGetter.class);
   
   private final WorkerData workerData;
   private final ResourcePool pool;
@@ -42,16 +47,18 @@ public class ArrParGetter<A extends Array<?>> {
   public ArrPartition<A> waitAndGet(long timeOut) throws Exception {
     // Wait for data arrival
     ByteArray byteArray = CommUtil.waitAndGet(this.workerData, ByteArray.class,
-      timeOut, 100);
+      timeOut, 500);
     if (byteArray == null) {
+      LOG.error("ByteArray are not got.");
       return null;
     }
     ArrPartition<A> partition = null;
     A array = desiealizeToArray(byteArray, this.pool, this.aClass);
     // Meta data is the partition id
-    int partiionID = byteArray.getMetaData()[0];
-    partition = new ArrPartition<A>(array, partiionID);
+    int partitionID = byteArray.getMetaArray()[0];
+    partition = new ArrPartition<A>(array, partitionID);
     this.pool.getByteArrayPool().releaseArrayInUse(byteArray.getArray());
+    this.pool.getIntArrayPool().releaseArrayInUse(byteArray.getMetaArray());
     return partition;
   }
 

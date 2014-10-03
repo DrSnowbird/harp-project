@@ -21,12 +21,12 @@ import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -42,6 +42,7 @@ import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.mapred.ShuffleHandler;
+import org.apache.hadoop.mapred.TaskAttemptID;
 import org.apache.hadoop.mapreduce.MRJobConfig;
 import org.apache.hadoop.mapreduce.v2.api.records.TaskAttemptId;
 import org.apache.hadoop.mapreduce.v2.api.records.TaskType;
@@ -272,7 +273,7 @@ public class MapCollectiveContainerLauncherImpl extends AbstractService
     org.apache.hadoop.mapred.JobConf jobConf = (org.apache.hadoop.mapred.JobConf) conf;
     numMapTasks = jobConf.getNumMapTasks();
     // Initialize task location map
-    taskLocations = new HashMap<Integer, String>();
+    taskLocations = new TreeMap<Integer, String>();
     isPrinted = false;
   }
 
@@ -399,6 +400,7 @@ public class MapCollectiveContainerLauncherImpl extends AbstractService
           } else if (taskType == TaskType.REDUCE) {
             type = "REDUCE";
           }
+
           int taskID = launchEvent.getTaskAttemptID().getTaskId().getId();
           String jobID = launchEvent.getTaskAttemptID().getTaskId().getJobId().toString();
           org.apache.hadoop.yarn.api.records.Container container = launchEvent
@@ -408,9 +410,28 @@ public class MapCollectiveContainerLauncherImpl extends AbstractService
           RackResolver.init(getConfig());
           String nodeRackName = RackResolver.resolve(
             container.getNodeId().getHost()).getNetworkLocation();
-          String memStr = getConfig().get(
-            "mapreduce.map.collective.java.memory.mb", "<missing conf2>");
-          int maxMem = Integer.parseInt(memStr);
+          // String memStr = getConfig().get(
+          //  "mapreduce.map.collective.java.memory.mb", "<missing conf2>");
+          // This is to simulate the process to modify "@taskid@"
+          // to get the new option string
+          // We get remoteTask from launchEvent
+          // Here the remoteTask is used to create launch context
+          // where java opts are built.
+          // TaskAttemptID is different from TaskAttemptId
+          TaskAttemptID attemptID = launchEvent.getRemoteTask().getTaskID();
+          String javaOptsStr = getConfig().get("mapreduce.map.java.opts", "");
+          javaOptsStr = javaOptsStr.replace("@taskid@", attemptID.toString());
+          String[] javaOpts = javaOptsStr.split("[\\s]+");
+          List<String> realJavaOpts = new ArrayList<String>();
+          for (String javaOpt : javaOpts) {
+            if (!javaOpt.equals("")) {
+              realJavaOpts.add(javaOpt);
+            }
+          }
+          String newJavaOptsStr = getConfig().get(
+            "mapreduce.map.collective.java.opts", "");
+          newJavaOptsStr = newJavaOptsStr.replace("@taskid@",
+            attemptID.toString()).trim();
           int conID = containerID.getId();
           int conMem = launchEvent.getAllocatedContainer().getResource()
             .getMemory();
@@ -418,9 +439,9 @@ public class MapCollectiveContainerLauncherImpl extends AbstractService
             .getVirtualCores();
           LOG.info("Container launch info: " + "task_id = " + taskID + ", "
             + "task_type = " + type + ", " + "host = " + host + ", "
-            + "rack = " + nodeRackName + ", " + "mem = " + maxMem + ", "
-            + "container ID = " + conID + ", " + "container mem = " + conMem
-            + ", " + "container core = " + conCore);
+            + "rack = " + nodeRackName + ", " + "container ID = " + conID
+            + ", " + "container mem = " + conMem + ", " + "container core = "
+            + conCore + ", " + "java new opts = " + newJavaOptsStr);
           if (taskType == TaskType.MAP) {
             // jobID should be the same for all the tasks here
             recordTaskLocations(jobID, taskID, host, nodeRackName);
@@ -429,9 +450,18 @@ public class MapCollectiveContainerLauncherImpl extends AbstractService
             .getCommands();
           List<String> newCmds = new ArrayList<String>();
           for (String cmd : commands) {
-            String newCmd = cmd.replaceFirst("-Xmx[0-9]+M", "-Xmx" + maxMem
-              + "M");
-            LOG.info("Java cmd: " + newCmd);
+            // LOG.info("Java cmd: " + cmd);
+            String newCmd = cmd;
+            // If there are new Java opts
+            if (!newJavaOptsStr.equals("")) {
+              // Remove original opts from 1 to the last one
+              for (int i = 1; i < realJavaOpts.size(); i++) {
+                newCmd = newCmd.replace(realJavaOpts.get(i), "");
+              }
+              // Replace the first one (0) to new opts
+              newCmd = newCmd.replace(realJavaOpts.get(0), newJavaOptsStr);
+            }
+            LOG.info("Java new cmd: " + newCmd);
             newCmds.add(newCmd);
           }
           launchEvent.getContainerLaunchContext().setCommands(newCmds);
@@ -462,42 +492,84 @@ public class MapCollectiveContainerLauncherImpl extends AbstractService
    */
   private void recordTaskLocations(String jobID, int taskID, String host,
     String rack) {
-    taskLocations.put(taskID, host);
-    if (taskLocations.size() == this.numMapTasks && !isPrinted) {
-      LOG.info("START PRINTING TASK LOCATIONS");
-      for (Entry<Integer, String> entry : taskLocations.entrySet()) {
-        LOG.info("Task ID: " + entry.getKey() + ". Task Location: "
-          + entry.getValue());
-      }
-      // Write several files to HDFS
-      String nodesFile = "/" + jobID + "/nodes";
-      String lockFile = "/" + jobID + "/lock";
-      try {
-        // Write nodes file to HDFS
-        Path path = new Path(nodesFile);
-        FileSystem fs = FileSystem.get(getConfig());
-        FSDataOutputStream out = fs.create(path, true);
-        BufferedWriter bw = new BufferedWriter(new OutputStreamWriter(out));
-        bw.write("#0");
-        bw.newLine();
-        for (String value : taskLocations.values()) {
-          bw.write(value);
-          bw.newLine();
+    synchronized (taskLocations) {
+      taskLocations.put(taskID, host);
+      LOG.info("Record task " + taskID + ", node " + host
+        + ". Current number of tasks recorded: " + taskLocations.size());
+      if (taskLocations.size() == this.numMapTasks && !isPrinted) {
+        Map<String, List<Integer>> nodeTaskMap = new TreeMap<String, List<Integer>>();
+        int task = 0;
+        String node = null;
+        List<Integer> tasks = null;
+        for (Entry<Integer, String> entry : taskLocations.entrySet()) {
+          task = entry.getKey();
+          node = entry.getValue();
+          tasks = nodeTaskMap.get(node);
+          if(tasks == null) {
+            tasks = new ArrayList<Integer>();
+            nodeTaskMap.put(node, tasks);
+          }
+          tasks.add(task);
         }
-        bw.flush();
-        out.hflush();
-        out.hsync();
-        bw.close();
-        // Write Lock file
-        Path lock = new Path(lockFile);
-        FSDataOutputStream lockOut = fs.create(lock, true);
-        lockOut.hflush();
-        lockOut.hsync();
-        lockOut.close();
-      } catch (IOException e) {
-        LOG.info("Error when writing nodes file to HDFS. ", e);
+        LOG.info("PRINT TASK LOCATIONS");
+        for (Entry<Integer, String> entry : taskLocations.entrySet()) {
+          task = entry.getKey();
+          node = entry.getValue();
+          LOG.info("Task ID: " + task + ". Task Location: " + node);
+        }
+        LOG.info("PRINT NODE AND TASK MAPPING");
+        // Write several files to HDFS
+        String nodesFile = "/" + jobID + "/nodes";
+        // Mapping between task IDs and worker IDs
+        String tasksFile = "/" + jobID + "/tasks";
+        String lockFile = "/" + jobID + "/lock";
+        try {
+          FileSystem fs = FileSystem.get(getConfig());
+          // Write nodes file to HDFS
+          Path nodesPath = new Path(nodesFile);
+          FSDataOutputStream out1 = fs.create(nodesPath, true);
+          BufferedWriter bw1 = new BufferedWriter(new OutputStreamWriter(out1));
+          bw1.write("#0");
+          bw1.newLine();
+          // Write tasks file
+          Path tasksPath = new Path(tasksFile);
+          FSDataOutputStream out2 = fs.create(tasksPath, true);
+          BufferedWriter bw2 = new BufferedWriter(new OutputStreamWriter(out2));
+          // Worker ID starts from 0
+          int workerID = 0;
+          for (Entry<String, List<Integer>> entry : nodeTaskMap.entrySet()) {
+            node = entry.getKey();
+            tasks = entry.getValue();
+            for (int i = 0; i < tasks.size(); i++) {
+              // Write together
+              // For each task, there is a line in nodes file
+              // There is also a task ID and worker ID mapping in tasks file
+              bw1.write(node + "\n");
+              bw2.write(tasks.get(i) + "\t" + workerID + "\n");
+              LOG.info("Node: " + node + ". Task: " + tasks.get(i)
+                + ". Worker: " + workerID);
+              workerID++;
+            }
+          }
+          bw1.flush();
+          out1.hflush();
+          out1.hsync();
+          bw1.close();
+          bw2.flush();
+          out2.hflush();
+          out2.hsync();
+          bw2.close();
+          // Write Lock file
+          Path lock = new Path(lockFile);
+          FSDataOutputStream lockOut = fs.create(lock, true);
+          lockOut.hflush();
+          lockOut.hsync();
+          lockOut.close();
+        } catch (IOException e) {
+          LOG.info("Error when writing nodes file to HDFS. ", e);
+        }
+        isPrinted = true;
       }
-      isPrinted = true;
     }
   }
 

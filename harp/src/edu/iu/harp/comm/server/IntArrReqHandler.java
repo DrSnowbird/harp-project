@@ -36,6 +36,7 @@ public class IntArrReqHandler extends ByteArrReqHandler {
     IntArray intArray = deserializeBytesToIntArray(byteArray.getArray(),
       this.getResourcePool());
     // If success, release bytes
+    // Meta array doesn't exist in sending int array
     this.getResourcePool().getByteArrayPool()
       .releaseArrayInUse(byteArray.getArray());
     return intArray;

@@ -20,7 +20,6 @@ import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 
 import java.util.Arrays;
-import java.util.Map.Entry;
 import java.util.Random;
 
 import edu.iu.harp.arrpar.ArrCombiner;
@@ -68,7 +67,7 @@ public class RegroupWorker extends CollCommWorker {
       port, Constants.NUM_HANDLER_THREADS);
     receiver.start();
     // Master check if all slaves are ready
-    boolean success = masterBarrier(workers, workerData, resourcePool);
+    boolean success = masterHandshake(workers, workerData, resourcePool);
     LOG.info("Barrier: " + success);
     // ------------------------------------------------------------------------
     // Generate data partition
@@ -138,6 +137,9 @@ public class RegroupWorker extends CollCommWorker {
   public static <A extends Array<?>, C extends ArrCombiner<A>> void regroupCombine(
     Workers workers, WorkerData workerData, ResourcePool resourcePool,
     ArrTable<A, C> table) throws Exception {
+    if (workers.getNumWorkers() <= 1) {
+      return;
+    }
     int workerID = workers.getSelfID();
     int[] partitionIDs = table.getPartitionIDs();
     int numWorkers = workers.getNumWorkers();
@@ -145,8 +147,8 @@ public class RegroupWorker extends CollCommWorker {
     // Gather the information of generated partitions to master
     // Generate partition and worker mapping for regrouping
     // Bcast partition regroup request
+    // LOG.info("Gather partition information.");
     long startTime = System.currentTimeMillis();
-    LOG.info("Gather partition information.");
     ParGenAck pGenAck = new ParGenAck(workerID, partitionIDs);
     ParGenAck[][] pGenAckRef = new ParGenAck[1][];
     try {
@@ -157,11 +159,12 @@ public class RegroupWorker extends CollCommWorker {
       return;
     }
     long endTime = System.currentTimeMillis();
-    LOG.info("All partition information are gathered.");
+    // LOG.info("All partition information are gathered.");
     LOG.info("Regroup-combine sync overhead (ms): " + (endTime - startTime));
     if (!success) {
       throw new Exception("Fail to gather data.");
     }
+    RegroupReq[] regroupReqRef = new RegroupReq[1];
     RegroupReq regroupReq = null;
     if (workers.isMaster()) {
       ParGenAck[] pGenAcks = pGenAckRef[0];
@@ -175,32 +178,33 @@ public class RegroupWorker extends CollCommWorker {
           partitionWorkers.put(parIds[j], destWorkerID);
           workerPartitionCount.addTo(destWorkerID, 1);
         }
-        // Free pGenAck, no use in future
         resourcePool.getWritableObjectPool().freeWritableObjectInUse(
           pGenAcks[i]);
       }
-      // ------------------------------------------------------------------------
-      // Bcast
-      LOG.info("Partition : Worker");
-      for (Entry<Integer, Integer> entry : partitionWorkers.entrySet()) {
-        LOG.info(entry.getKey() + " " + entry.getValue());
-      }
-      LOG.info("Worker : PartitionCount");
-      for (Entry<Integer, Integer> entry : workerPartitionCount.entrySet()) {
-        LOG.info(entry.getKey() + " " + entry.getValue());
-      }
+      // LOG.info("Partition : Worker");
+      // for (Entry<Integer, Integer> entry : partitionWorkers.entrySet()) {
+      // LOG.info(entry.getKey() + " " + entry.getValue());
+      // }
+      // LOG.info("Worker : PartitionCount");
+      // for (Entry<Integer, Integer> entry : workerPartitionCount.entrySet()) {
+      // LOG.info(entry.getKey() + " " + entry.getValue());
+      // }
       regroupReq = new RegroupReq(partitionWorkers, workerPartitionCount);
+      regroupReqRef[0] = regroupReq;
     }
-    LOG.info("Bcast regroup information.");
-    RegroupReq[] regroupReqRef = new RegroupReq[1];
-    regroupReqRef[0] = regroupReq;
-    success = reqChainBcast(regroupReqRef, workers, workerData,
-      resourcePool, RegroupReq.class);
+    pGenAck = null;
+    pGenAckRef = null;
+    partitionIDs = null;
+    // ------------------------------------------------------------------------
+    // Bcast
+    // LOG.info("Bcast regroup information.");
+    success = reqChainBcast(regroupReqRef, workers, workerData, resourcePool,
+      RegroupReq.class);
     if (!success) {
-      return;
+      throw new Exception("Fail to bcast data.");
     }
-    LOG.info("Regroup information is bcasted.");
     regroupReq = regroupReqRef[0];
+    // LOG.info("Regroup information is bcasted.");
     // ------------------------------------------------------------------------
     // Send partition
     ArrPartition<A>[] partitions = table.getPartitions();
@@ -223,13 +227,14 @@ public class RegroupWorker extends CollCommWorker {
         remvPartitions.add(partitions[order[i]]);
       }
     }
+    partitions = null;
     // ------------------------------------------------------------------------
     // Receive all the data from the queue
     Int2IntOpenHashMap workerPartitionCount = regroupReq
       .getWorkerPartitionCountMap();
     int totalPartitionsRecv = workerPartitionCount.get(workerID)
       - localParCount;
-    LOG.info("Total receive: " + totalPartitionsRecv);
+    // LOG.info("Total receive: " + totalPartitionsRecv);
     ArrParGetter<A> pRegWorker = new ArrParGetter<A>(workerData, resourcePool,
       table.getAClass());
     for (int i = 0; i < totalPartitionsRecv; i++) {
@@ -242,6 +247,7 @@ public class RegroupWorker extends CollCommWorker {
       table.removePartition(partition.getPartitionID());
       releaseArrayPartition(partition, resourcePool);
     }
+    remvPartitions = null;
     // Add received partitions
     for (ArrPartition<A> partition : recvPartitions) {
       if (table.addPartition(partition)) {
@@ -249,10 +255,13 @@ public class RegroupWorker extends CollCommWorker {
         releaseArrayPartition(partition, resourcePool);
       }
     }
+    recvPartitions = null;
     // Free regroupReq, no use in future
     resourcePool.getWritableObjectPool().freeWritableObjectInUse(regroupReq);
+    regroupReqRef = null;
+    regroupReq = null;
+    // LOG.info("Start collect regroup finishing information.");
     startTime = System.currentTimeMillis();
-    LOG.info("Start collect regroup finishing information.");
     ReqAck reqAck = new ReqAck(workerID, 0);
     ReqAck[][] reqAckRef = new ReqAck[1][];
     try {
@@ -261,8 +270,15 @@ public class RegroupWorker extends CollCommWorker {
       LOG.error("Error when gathering data.", e);
       return;
     }
-    LOG.info("All regroup finishing information are collected.");
+    if (workers.isMaster()) {
+      ReqAck[] reqAcks = reqAckRef[0];
+      for (int i = 0; i < reqAcks.length; i++) {
+        resourcePool.getWritableObjectPool()
+          .freeWritableObjectInUse(reqAcks[i]);
+      }
+    }
     endTime = System.currentTimeMillis();
+    // LOG.info("All regroup finishing information are collected.");
     LOG
       .info("Regroup-combine end sync overhead (ms): " + (endTime - startTime));
   }
@@ -355,7 +371,7 @@ public class RegroupWorker extends CollCommWorker {
         }
       } while (pos >= 0);
       num[i] = next;
-      LOG.info("num_" + i + "=" + num[i]);
+      // LOG.info("num_" + i + "=" + num[i]);
       // System.out.println("num_" + i + "=" + num[i]);
     }
     return num;

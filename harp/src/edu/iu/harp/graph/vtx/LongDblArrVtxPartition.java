@@ -16,7 +16,6 @@
 
 package edu.iu.harp.graph.vtx;
 
-import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 
 import java.io.DataInput;
@@ -25,8 +24,6 @@ import java.io.IOException;
 
 import org.apache.log4j.Logger;
 
-import edu.iu.harp.util.Long2ObjectOpenHashMap;
-
 /**
  * Each value is a double array... We assume it is not big, each of them just
  * have few elements.
@@ -34,7 +31,7 @@ import edu.iu.harp.util.Long2ObjectOpenHashMap;
  * @author zhangbj
  * 
  */
-public class LongDblArrVtxPartition extends LongObjVtxPartition<double[]> {
+public class LongDblArrVtxPartition extends LongAbstractObjVtxPartition<double[]> {
   
   /** Class logger */
   private static final Logger LOG = Logger.getLogger(LongDblArrVtxPartition.class);
@@ -146,7 +143,7 @@ public class LongDblArrVtxPartition extends LongObjVtxPartition<double[]> {
     int size = in.readInt();
     if (this.getVertexMap() != null) {
       int mapSize = this.getVertexMap().clean();
-      LOG.info("Real Map Size: " + size + " Map Container Size: " + mapSize);
+      // LOG.info("Real Map Size: " + size + " Map Container Size: " + mapSize);
     } else {
       this.createVertexMap(size, double[].class);
     }

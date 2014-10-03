@@ -58,7 +58,7 @@ public class IntArrChainBcastMaster extends ByteArrChainBcastMaster {
       + (start2 - start1) + ". Serialization time:" + (end - start2));
     ByteArray byteArray = new ByteArray();
     byteArray.setArray(bytes);
-    byteArray.setMetaData(null);
+    byteArray.setMetaArray(null);
     byteArray.setSize(size);
     byteArray.setStart(0);
     return byteArray;

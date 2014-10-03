@@ -33,7 +33,7 @@ public class Constants {
   public static final byte DOUBLE_ARRAY_REQUEST = 12;
   public static final byte DOUBLE_ARRAY_CHAIN_BCAST = 13;
   
-	public static final int DATA_MAX_WAIT_TIME = 600; // seconds
+	public static final int DATA_MAX_WAIT_TIME = 1800; // seconds
 	
 	public static final int CONNECT_MAX_WAIT_TIME = 60000;
 
@@ -45,10 +45,10 @@ public class Constants {
 	public static final int SLEEP_COUNT = 100;
 	public static final int RETRY_COUNT = 100;
 	
-	public static final int NUM_HANDLER_THREADS = 16;
-	public static final int NUM_DESERIAL_THREADS = 16;
-	public static final int NUM_SENDER_THREADS = 16;
-	public static final int DEFAULT_WORKER_POART_BASE = 12700;
+	public static final int NUM_HANDLER_THREADS = 32;
+	public static final int NUM_DESERIAL_THREADS = 32;
+	public static final int NUM_SENDER_THREADS = 32;
+	public static final int DEFAULT_WORKER_POART_BASE = 12800;
 
 
 

@@ -31,6 +31,9 @@ import java.util.List;
 import java.util.Map.Entry;
 import java.util.Random;
 
+import edu.iu.harp.arrpar.ArrPartition;
+import edu.iu.harp.arrpar.ArrTable;
+import edu.iu.harp.arrpar.DoubleArrPlus;
 import edu.iu.harp.comm.Constants;
 import edu.iu.harp.comm.WorkerData;
 import edu.iu.harp.comm.WorkerInfo;
@@ -38,11 +41,10 @@ import edu.iu.harp.comm.Workers;
 import edu.iu.harp.comm.client.ByteArrReqSender;
 import edu.iu.harp.comm.data.ByteArray;
 import edu.iu.harp.comm.data.Commutable;
-import edu.iu.harp.comm.request.AllgatherReq;
+import edu.iu.harp.comm.data.DoubleArray;
 import edu.iu.harp.comm.request.MultiBinAllToAllReq;
 import edu.iu.harp.comm.request.MultiBinParGenAck;
 import edu.iu.harp.comm.request.MultiBinRegroupReq;
-import edu.iu.harp.comm.request.ParCountAck;
 import edu.iu.harp.comm.request.ParGenAck;
 import edu.iu.harp.comm.request.ReqAck;
 import edu.iu.harp.comm.resource.ResourcePool;
@@ -88,7 +90,7 @@ public class GraphWorker extends CollCommWorker {
       port, Constants.NUM_HANDLER_THREADS);
     receiver.start();
     // Master check if all slaves are ready
-    boolean success = masterBarrier(workers, workerData, resourcePool);
+    boolean success = masterHandshake(workers, workerData, resourcePool);
     LOG.info("Barrier: " + success);
     // ------------------------------------------------------------------------
     // Generate in-edge table and vertex table (for pagerank value) , (for out
@@ -355,6 +357,7 @@ public class GraphWorker extends CollCommWorker {
     msgRegroupReq = msgRegroupReqRef[0];
     // ------------------------------------------------------------------------
     // Send partition
+    int tableID = msgTable.getTableID();
     MsgPartition<I, M>[] partitions = msgTable.getPartitions();
     Int2ObjectOpenHashMap<IntArrayList> partitionWorkers = msgRegroupReq
       .getPartitionWorkerMap();
@@ -374,8 +377,8 @@ public class GraphWorker extends CollCommWorker {
           isSentToLocal = true;
         } else {
           WorkerInfo workerInfo = workers.getWorkerInfo(destID);
-          send(partition, workerInfo.getNode(), workerInfo.getPort(), workerID,
-            resourcePool);
+          send(tableID, partition, workerInfo.getNode(), workerInfo.getPort(),
+            workerID, resourcePool);
         }
       }
       if (!isSentToLocal) {
@@ -390,7 +393,7 @@ public class GraphWorker extends CollCommWorker {
     LOG.info("Total receive: " + totalDataRecv);
     Int2ObjectOpenHashMap<ObjectArrayList<ByteArray>> recvBinPartitions = new Int2ObjectOpenHashMap<ObjectArrayList<ByteArray>>();
     waitAndGetBinPartitions(recvBinPartitions, totalDataRecv, workerData,
-      Constants.DATA_MAX_WAIT_TIME);
+      resourcePool, Constants.DATA_MAX_WAIT_TIME);
     // Remove partitions sent out
     for (MsgPartition<I, M> partition : remvPartitions) {
       msgTable.removePartition(partition.getPartitionID());
@@ -411,6 +414,13 @@ public class GraphWorker extends CollCommWorker {
     } catch (Exception e) {
       LOG.error("Error when gathering data.", e);
       return;
+    }
+    // Free all rhe reqAck
+    ReqAck[] reqAcks = reqAckRef[0];
+    if (reqAcks != null) {
+      for (ReqAck ack : reqAcks) {
+        resourcePool.getWritableObjectPool().freeWritableObjectInUse(ack);
+      }
     }
     LOG.info("End collect regroup finishing information.");
   }
@@ -542,6 +552,7 @@ public class GraphWorker extends CollCommWorker {
     edgeRegroupReq = edgeRegroupReqRef[0];
     // ------------------------------------------------------------------------
     // Send partition
+    int tableID = edgeTable.getTableID();
     EdgePartition<I, E>[] partitions = edgeTable.getPartitions();
     Int2ObjectOpenHashMap<IntArrayList> partitionWorkers = edgeRegroupReq
       .getPartitionWorkerMap();
@@ -561,8 +572,8 @@ public class GraphWorker extends CollCommWorker {
           isSentToLocal = true;
         } else {
           WorkerInfo workerInfo = workers.getWorkerInfo(destID);
-          send(partition, workerInfo.getNode(), workerInfo.getPort(), workerID,
-            resourcePool);
+          send(tableID, partition, workerInfo.getNode(), workerInfo.getPort(),
+            workerID, resourcePool);
         }
       }
       if (!isSentToLocal) {
@@ -576,7 +587,7 @@ public class GraphWorker extends CollCommWorker {
     int totalDataRecv = workerPartitionCount.get(workerID) - localDataCount;
     LOG.info("Total receive: " + totalDataRecv);
     Int2ObjectOpenHashMap<ObjectArrayList<ByteArray>> recvBinPartitions = new Int2ObjectOpenHashMap<ObjectArrayList<ByteArray>>();
-    waitAndGetBinPartitions(recvBinPartitions, totalDataRecv, workerData,
+    waitAndGetBinPartitions(recvBinPartitions, totalDataRecv, workerData, resourcePool,
       Constants.DATA_MAX_WAIT_TIME);
     // Remove partitions sent out
     for (EdgePartition<I, E> partition : remvPartitions) {
@@ -599,6 +610,13 @@ public class GraphWorker extends CollCommWorker {
     } catch (Exception e) {
       LOG.error("Error when gathering data.", e);
       return;
+    }
+    // Free all rhe reqAck
+    ReqAck[] reqAcks = reqAckRef[0];
+    if (reqAcks != null) {
+      for (ReqAck ack : reqAcks) {
+        resourcePool.getWritableObjectPool().freeWritableObjectInUse(ack);
+      }
     }
     LOG.info("End collect regroup finishing information.");
   }
@@ -622,18 +640,19 @@ public class GraphWorker extends CollCommWorker {
     MultiBinParGenAck edgePGenAck = new MultiBinParGenAck(workerID,
       edgeParDataCount);
     MultiBinParGenAck[][] edgePGenAckRef = new MultiBinParGenAck[1][];
-    LOG.info("Gather edge partition info.");
+    // LOG.info("Gather edge partition info.");
     try {
       reqGather(workers, workerData, edgePGenAck, edgePGenAckRef, resourcePool);
     } catch (Exception e) {
       LOG.error("Error when gathering edge partition info.", e);
       return;
     }
-    LOG.info("All msg partition info are gathered.");
+    // LOG.info("All msg partition info are gathered.");
     // --------------------------------------------------------------------------
     // Generate partition and worker mapping for regrouping
     // Bcast partition regroup request
     MultiBinRegroupReq edgeRegroupReq = null;
+    MultiBinRegroupReq[] edgeRegroupReqRef = new MultiBinRegroupReq[1];
     if (workers.isMaster()) {
       MultiBinParGenAck[] edgePGenAcks = edgePGenAckRef[0];
       // Partition <-> Worker mapping (hash)
@@ -653,30 +672,31 @@ public class GraphWorker extends CollCommWorker {
           edgePGenAcks[i]);
       }
       // Print partition distribution
-      LOG.info("Partition : Worker");
-      for (Int2IntMap.Entry entry : partitionWorker.int2IntEntrySet()) {
-        LOG.info(entry.getIntKey() + ":" + entry.getIntValue());
-      }
-      LOG.info("Worker : Data Count");
-      for (Entry<Integer, Integer> entry : workerPartitionCount.entrySet()) {
-        LOG.info(entry.getKey() + " " + entry.getValue());
-      }
+      // LOG.info("Partition : Worker");
+      // for (Int2IntMap.Entry entry : partitionWorker.int2IntEntrySet()) {
+      // LOG.info(entry.getIntKey() + ":" + entry.getIntValue());
+      // }
+      // LOG.info("Worker : Data Count");
+      // for (Entry<Integer, Integer> entry : workerPartitionCount.entrySet()) {
+      // LOG.info(entry.getKey() + " " + entry.getValue());
+      // }
+      //
       edgeRegroupReq = new MultiBinRegroupReq(partitionWorker,
         workerPartitionCount);
+      edgeRegroupReqRef[0] = edgeRegroupReq;
     }
     // ------------------------------------------------------------------------
-    LOG.info("Bcast regroup information.");
-    MultiBinRegroupReq[] edgeRegroupReqRef = new MultiBinRegroupReq[1];
-    edgeRegroupReqRef[0] = edgeRegroupReq;
+    // LOG.info("Bcast regroup information.");
     boolean success = reqChainBcast(edgeRegroupReqRef, workers, workerData,
       resourcePool, MultiBinRegroupReq.class);
     if (!success) {
       return;
     }
-    LOG.info("Regroup information is bcasted.");
+    // LOG.info("Regroup information is bcasted.");
     edgeRegroupReq = edgeRegroupReqRef[0];
     // ------------------------------------------------------------------------
     // Send partition
+    int tableID = edgeTable.getTableID();
     EdgePartition<I, E>[] partitions = edgeTable.getPartitions();
     Int2IntOpenHashMap partitionWorker = edgeRegroupReq.getPartitionWorkerMap();
     ObjectArrayList<EdgePartition<I, E>> remvPartitions = new ObjectArrayList<EdgePartition<I, E>>();
@@ -691,8 +711,8 @@ public class GraphWorker extends CollCommWorker {
         localDataCount = localDataCount + partition.getData().size();
       } else {
         WorkerInfo workerInfo = workers.getWorkerInfo(destWorkerID);
-        send(partition, workerInfo.getNode(), workerInfo.getPort(), workerID,
-          resourcePool);
+        send(tableID, partition, workerInfo.getNode(), workerInfo.getPort(),
+          workerID, resourcePool);
         remvPartitions.add(partition);
       }
     }
@@ -701,10 +721,10 @@ public class GraphWorker extends CollCommWorker {
     Int2IntOpenHashMap workerPartitionCount = edgeRegroupReq
       .getWorkerPartitionCountMap();
     int totalDataRecv = workerPartitionCount.get(workerID) - localDataCount;
-    LOG.info("Total receive: " + totalDataRecv);
+    // LOG.info("Total receive: " + totalDataRecv);
     Int2ObjectOpenHashMap<ObjectArrayList<ByteArray>> recvBinPartitions = new Int2ObjectOpenHashMap<ObjectArrayList<ByteArray>>();
     waitAndGetBinPartitions(recvBinPartitions, totalDataRecv, workerData,
-      Constants.DATA_MAX_WAIT_TIME);
+      resourcePool, Constants.DATA_MAX_WAIT_TIME);
     // Remove partitions sent out
     for (EdgePartition<I, E> partition : remvPartitions) {
       edgeTable.removePartition(partition.getPartitionID());
@@ -718,7 +738,7 @@ public class GraphWorker extends CollCommWorker {
     // Free regroupReq, no use in future
     resourcePool.getWritableObjectPool()
       .freeWritableObjectInUse(edgeRegroupReq);
-    LOG.info("Start collect regroup finishing information.");
+    // LOG.info("Start collect regroup finishing information.");
     ReqAck reqAck = new ReqAck(workerID, 0);
     ReqAck[][] reqAckRef = new ReqAck[1][];
     try {
@@ -727,7 +747,14 @@ public class GraphWorker extends CollCommWorker {
       LOG.error("Error when gathering data.", e);
       return;
     }
-    LOG.info("End collect regroup finishing information.");
+    // Free all rhe reqAck
+    ReqAck[] reqAcks = reqAckRef[0];
+    if (reqAcks != null) {
+      for (ReqAck ack : reqAcks) {
+        resourcePool.getWritableObjectPool().freeWritableObjectInUse(ack);
+      }
+    }
+    // LOG.info("End collect regroup finishing information.");
   }
 
   private static int[] createRandomNumersInRange(long seed, int max) {
@@ -741,23 +768,35 @@ public class GraphWorker extends CollCommWorker {
       } while (set.contains(next));
       num[i] = next;
       set.add(next);
-      LOG.info("num_" + i + "=" + num[i]);
+      // LOG.info("num_" + i + "=" + num[i]);
     }
     return num;
   }
 
   private static void waitAndGetBinPartitions(
     Int2ObjectOpenHashMap<ObjectArrayList<ByteArray>> recvBinPartitions,
-    int totalByteArrayCount, WorkerData workerData, long perDataTimeOut) {
+    int totalByteArrayCount, WorkerData workerData, ResourcePool resourcePool,
+    long perDataTimeOut) {
+    ObjectArrayList<Commutable> skippedCommData = new ObjectArrayList<Commutable>();
     for (int i = 0; i < totalByteArrayCount; i++) {
       // Wait if data arrives
       Commutable data = workerData.waitAndGetCommData(perDataTimeOut);
       if (data == null) {
         return;
       }
+      // Skip non-byte arry data.
+      if (!(data instanceof ByteArray)) {
+        skippedCommData.add(data);
+        i--;
+        continue;
+      }
       ByteArray byteArray = (ByteArray) data;
-      int[] metaData = byteArray.getMetaData();
-      int partitionID = metaData[1];
+      int[] metaArray = byteArray.getMetaArray();
+      int partitionID = metaArray[2];
+      // Once partition are got, meta array can be released
+      resourcePool.getIntArrayPool().releaseArrayInUse(metaArray);
+      byteArray.setMetaArray(null);
+      byteArray.setMetaArraySize(0);
       ObjectArrayList<ByteArray> byteArrays = recvBinPartitions
         .get(partitionID);
       if (byteArrays == null) {
@@ -766,39 +805,55 @@ public class GraphWorker extends CollCommWorker {
       }
       byteArrays.add(byteArray);
     }
+    if (!skippedCommData.isEmpty()) {
+      workerData.putAllCommData(skippedCommData);
+    }
   }
 
-  public static <I extends VertexID, M extends MsgVal> void send(
+  public static <I extends VertexID, M extends MsgVal> void send(int tableID,
     MsgPartition<I, M> partition, String host, int port, int senderID,
     ResourcePool resourcePool) {
     List<ByteArray> arrays = partition.getData();
     for (int i = 0; i < arrays.size(); i++) {
       ByteArray array = arrays.get(i);
-      int[] metaData = new int[3];
-      metaData[0] = senderID;
-      metaData[1] = partition.getPartitionID();
-      metaData[2] = i;
-      array.setMetaData(metaData);
+      // int[] metaData = new int[3];
+      int[] metaArray = resourcePool.getIntArrayPool().getArray(3);
+      metaArray[0] = senderID;
+      metaArray[1] = tableID;
+      metaArray[2] = partition.getPartitionID();
+      array.setMetaArray(metaArray);
+      array.setMetaArraySize(3);
       ByteArrReqSender sender = new ByteArrReqSender(host, port, array,
         resourcePool);
       sender.execute();
+      // Once data are sent, no use for meta data
+      resourcePool.getIntArrayPool().releaseArrayInUse(metaArray);
+      array.setMetaArray(null);
+      array.setMetaArraySize(0);
     }
   }
 
-  public static <I extends VertexID, E extends EdgeVal> void send(
+  public static <I extends VertexID, E extends EdgeVal> void send(int tableID,
     EdgePartition<I, E> partition, String host, int port, int senderID,
     ResourcePool resourcePool) {
     List<ByteArray> arrays = partition.getData();
     for (int i = 0; i < arrays.size(); i++) {
       ByteArray array = arrays.get(i);
-      int[] metaData = new int[3];
-      metaData[0] = senderID;
-      metaData[1] = partition.getPartitionID();
-      metaData[2] = i;
-      array.setMetaData(metaData);
+      // int[] metaData = new int[3];
+      int[] metaArray = resourcePool.getIntArrayPool().getArray(3);
+      metaArray[0] = senderID;
+      metaArray[1] = tableID;
+      metaArray[2] = partition.getPartitionID();
+      array.setMetaArray(metaArray);
+      array.setMetaArraySize(3);
+      // Byte array sending
       ByteArrReqSender sender = new ByteArrReqSender(host, port, array,
         resourcePool);
       sender.execute();
+      // Once data are sent, no use for meta data
+      resourcePool.getIntArrayPool().releaseArrayInUse(metaArray);
+      array.setMetaArray(null);
+      array.setMetaArraySize(0);
     }
   }
 
@@ -808,55 +863,43 @@ public class GraphWorker extends CollCommWorker {
     if (workers.getNumWorkers() == 1) {
       return;
     }
-    boolean success = true;
-    int workerID = workers.getSelfID();
-    // Gather the information of generated partitions to master
-    // Generate partition and worker mapping for regrouping
-    // Bcast partition allgather request
-    ParCountAck pCountAck = new ParCountAck(workerID, table.getNumPartitions());
-    ParCountAck[][] pCountAckRef = new ParCountAck[1][];
-    LOG.info("Gather partition information.");
-    long time1 = System.currentTimeMillis();
+    // Use allgather one to get the total partitions to receive
+    // Create table, use -1 * tableID to avoid conflict internally
+    // We may provide a fixed way to create table ID in future
+    ArrTable<DoubleArray, DoubleArrPlus> arrTable = new ArrTable<DoubleArray, DoubleArrPlus>(
+      table.getTableID() * -1, DoubleArray.class, DoubleArrPlus.class);
+    // Create DoubleArray
+    // Get double[1];
+    double[] vals = resourcePool.getDoubleArrayPool().getArray(1);
+    vals[0] = table.getNumPartitions();
+    DoubleArray inArray = new DoubleArray();
+    inArray.setArray(vals);
+    inArray.setSize(1);
+    // Create partition
+    // Use uniformed partition id for combining
+    ArrPartition<DoubleArray> arrPartition = new ArrPartition<DoubleArray>(
+      inArray, 0);
+    // Insert array to partition
     try {
-      success = reqGather(workers, workerData, pCountAck, pCountAckRef,
-        resourcePool);
+      if (arrTable.addPartition(arrPartition)) {
+        resourcePool.getDoubleArrayPool().releaseArrayInUse(inArray.getArray());
+      }
     } catch (Exception e) {
-      LOG.error("Error when gathering data.", e);
+      LOG.error("Fail to add partition to table", e);
       return;
     }
-    if (!success) {
-      throw new IOException("Fail to collect partition info in allgather");
+    try {
+      AllgatherWorker.allgatherOne(workers, workerData, resourcePool, arrTable);
+    } catch (Exception e) {
+      LOG.error("Fail to do allreduce one.", e);
+      return;
     }
-    long time2 = System.currentTimeMillis();
-    LOG.info("All partition information are gathered.");
-    AllgatherReq allgatherReq = null;
-    if (workers.isMaster()) {
-      int totalPartitions = 0;
-      ParCountAck[] pCountAcks = pCountAckRef[0];
-      for (int i = 0; i < pCountAcks.length; i++) {
-        LOG.info("WorkerID: " + pCountAcks[i].getWorkerID()
-          + " PartitionCount:" + pCountAcks[i].getPartitionCount());
-        totalPartitions = totalPartitions + pCountAcks[i].getPartitionCount();
-        // Free pGenAcks, no use in future
-        resourcePool.getWritableObjectPool().freeWritableObjectInUse(
-          pCountAcks[i]);
-      }
-      allgatherReq = new AllgatherReq(totalPartitions);
-    }
-    LOG.info("Bcast allgather information.");
-    // Receiver believe it is bcasted
-    AllgatherReq[] allgatherReqRef = new AllgatherReq[1];
-    allgatherReqRef[0] = allgatherReq;
-    success = reqChainBcast(allgatherReqRef, workers, workerData, resourcePool,
-      AllgatherReq.class);
-    if (!success) {
-      throw new IOException("Fail to bcast allgather request in allgather");
-    }
-    allgatherReq = allgatherReqRef[0];
-    long time3 = System.currentTimeMillis();
+    DoubleArray outArray = arrTable.getPartitions()[0].getArray();
+    int totalParRecv = (int) outArray.getArray()[0];
+    resourcePool.getDoubleArrayPool().releaseArrayInUse(outArray.getArray());
+    LOG.info("total partitions to receive: " + totalParRecv);
     // ------------------------------------------------------------------------
     int numDeserialThreads = Constants.NUM_DESERIAL_THREADS;
-    int totalParRecv = allgatherReq.getTotalRecvParNum();
     // Original catcher
     // StructParCatcher<P, T> catcher = new StructParCatcher<P, T>(workers,
     // workerData,
@@ -871,14 +914,27 @@ public class GraphWorker extends CollCommWorker {
     // StructParMultiThreadCatcher<P, T>(
     // workers, workerData, resourcePool, totalParRecv, table, numSendThreads,
     // numDeserialThreads);
-    success = catcher.waitAndGet();
-    resourcePool.getWritableObjectPool().releaseWritableObjectInUse(
-      allgatherReq);
+    boolean success = catcher.waitAndGet();
     if (!success) {
       throw new IOException("Fail to catch all partitions in allgather");
     }
-    long time4 = System.currentTimeMillis();
-    LOG.info("Allgather Time: " + (time2 - time1) + " " + (time3 - time2) + " "
-      + (time4 - time3));
+  }
+  
+  public static <P extends StructPartition, T extends StructTable<P>> void allgatherVtxTotalKnown(
+    Workers workers, WorkerData workerData, ResourcePool resourcePool, T table,
+    int totalNumPartitions) throws IOException {
+    if (workers.getNumWorkers() == 1) {
+      return;
+    }
+    // ------------------------------------------------------------------------
+    int numDeserialThreads = Constants.NUM_DESERIAL_THREADS;
+    // Partitions are put in one request
+    MultiStructParCatcher<P, T> catcher = new MultiStructParCatcher<P, T>(
+      workers, workerData, resourcePool, totalNumPartitions, table,
+      numDeserialThreads);
+    boolean success = catcher.waitAndGet();
+    if (!success) {
+      throw new IOException("Fail to catch all partitions in allgather");
+    }
   }
 }

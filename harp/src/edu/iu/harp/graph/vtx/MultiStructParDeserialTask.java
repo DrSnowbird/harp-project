@@ -26,8 +26,8 @@ import edu.iu.harp.comm.request.MultiStructPartition;
 import edu.iu.harp.comm.resource.DataDeserializer;
 import edu.iu.harp.comm.resource.ResourcePool;
 
-public class MultiStructParDeserialTask<P extends StructPartition> extends
-  Task<ByteArray, MultiStructPartition<P>> {
+public class MultiStructParDeserialTask extends
+  Task<ByteArray, MultiStructPartition> {
 
   /** Class logger */
   private static final Logger LOG = Logger
@@ -40,27 +40,31 @@ public class MultiStructParDeserialTask<P extends StructPartition> extends
   }
 
   @Override
-  public MultiStructPartition<P> run(ByteArray byteArray) throws Exception {
-    MultiStructPartition<P> multiPartitions = null;
+  public MultiStructPartition run(ByteArray byteArray) throws Exception {
+    MultiStructPartition multiPartitions = null;
     DataInput din = new DataDeserializer(byteArray.getArray());
     try {
       String className = din.readUTF();
-      multiPartitions = (MultiStructPartition<P>) resourcePool
+      multiPartitions = (MultiStructPartition) resourcePool
         .getWritableObjectPool().getWritableObject(className);
-      multiPartitions.setResourcePool(this.resourcePool);
+      multiPartitions.setResourcePool(resourcePool);
       multiPartitions.read(din);
-      LOG.info("Class name: " + className + ".");
+      // LOG.info("Class name: " + className + ".");
     } catch (Exception e) {
       LOG.error("Error in deserialization...", e);
-      // Free if error
+      // Clean and release if error
       if (multiPartitions != null) {
-        resourcePool.getWritableObjectPool().freeWritableObjectInUse(
+        multiPartitions.clean();
+        resourcePool.getWritableObjectPool().releaseWritableObjectInUse(
           multiPartitions);
+        multiPartitions = null;
       }
       throw e;
     }
     if (multiPartitions != null) {
       resourcePool.getByteArrayPool().releaseArrayInUse(byteArray.getArray());
+      resourcePool.getIntArrayPool()
+        .releaseArrayInUse(byteArray.getMetaArray());
     }
     return multiPartitions;
   }

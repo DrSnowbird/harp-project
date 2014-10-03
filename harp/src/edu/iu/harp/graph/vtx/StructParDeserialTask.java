@@ -31,11 +31,19 @@ public class StructParDeserialTask<P extends StructPartition> extends
 
   @Override
   public P run(ByteArray byteArray) throws Exception {
-    P partition = (P) StructObjReqHandler.deserializeStructObjFromBytes(
-      byteArray.getArray(), byteArray.getSize(), resourcePool);
-    if (partition != null) {
-      resourcePool.getByteArrayPool().releaseArrayInUse(byteArray.getArray());
-      return partition;
+    byte[] bytes = byteArray.getArray();
+    int[] metaArray = byteArray.getMetaArray();
+    if (bytes != null) {
+      P partition = (P) StructObjReqHandler.deserializeStructObjFromBytes(
+        bytes, byteArray.getSize(), resourcePool);
+      if (partition != null) {
+        resourcePool.getByteArrayPool().releaseArrayInUse(bytes);
+        if (metaArray != null) {
+          resourcePool.getIntArrayPool().releaseArrayInUse(
+            byteArray.getMetaArray());
+        }
+        return partition;
+      }
     }
     return null;
   }

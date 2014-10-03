@@ -47,11 +47,12 @@ public class StructParDeliver<P extends StructPartition> extends
 
   @Override
   protected Commutable processData(Commutable data) throws Exception {
-    ByteArray array = (ByteArray) super.processData(data);
-    int[] metaData = new int[2];
-    metaData[0] = this.workerID;
-    metaData[1] = this.partitionID;
-    array.setMetaData(metaData);
-    return array;
+    ByteArray byteArray = (ByteArray) super.processData(data);
+    int[] metaArray = this.getResourcePool().getIntArrayPool().getArray(2);
+    metaArray[0] = this.workerID;
+    metaArray[1] = this.partitionID;
+    byteArray.setMetaArray(metaArray);
+    byteArray.setMetaArraySize(2);
+    return byteArray;
   }
 }

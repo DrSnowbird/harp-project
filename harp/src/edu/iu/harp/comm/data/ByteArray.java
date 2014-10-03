@@ -21,15 +21,26 @@ public class ByteArray extends Array<byte[]> {
   /**
    * The meta data is used to control the byte array communication in
    * complicated collective communication. It should be small with about 1~4
-   * integers...
+   * integers... not like array, meta array is always a seperated array. So its
+   * always starts at 0.
    */
-  private int[] metaData;
+  private int[] metaArray;
 
-  public int[] getMetaData() {
-    return metaData;
+  private int metaArraySize;
+
+  public int[] getMetaArray() {
+    return metaArray;
   }
 
-  public void setMetaData(int[] metaData) {
-    this.metaData = metaData;
+  public int getMetaArraySize() {
+    return metaArraySize;
+  }
+
+  public void setMetaArray(int[] metaArray) {
+    this.metaArray = metaArray;
+  }
+
+  public void setMetaArraySize(int metaArraySize) {
+    this.metaArraySize = metaArraySize;
   }
 }

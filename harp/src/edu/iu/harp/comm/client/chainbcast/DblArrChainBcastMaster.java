@@ -54,11 +54,11 @@ public class DblArrChainBcastMaster extends ByteArrChainBcastMaster {
       throw e;
     }
     long end = System.currentTimeMillis();
-    LOG.info("Double array size " + doublesSize + ". Create byte array time: "
-      + (start2 - start1) + ". Serialization time:" + (end - start2));
+    // LOG.info("Double array size " + doublesSize + ". Create byte array time: "
+    //  + (start2 - start1) + ". Serialization time:" + (end - start2));
     ByteArray array = new ByteArray();
     array.setArray(bytes);
-    array.setMetaData(null);
+    array.setMetaArray(null);
     array.setSize(size);
     array.setStart(0);
     return array;

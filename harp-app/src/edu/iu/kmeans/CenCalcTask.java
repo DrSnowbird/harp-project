@@ -17,85 +17,144 @@
 package edu.iu.kmeans;
 
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
+
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 
 import edu.iu.harp.arrpar.ArrPartition;
 import edu.iu.harp.collective.Task;
 import edu.iu.harp.comm.data.DoubleArray;
+import edu.iu.harp.comm.resource.ResourcePool;
 
-class Null {
-  public Null() {
-  }
-}
+public class CenCalcTask extends Task<DoubleArray, Map<Integer, DoubleArray>> {
 
-public class CenCalcTask extends Task<DoubleArray, Null> {
-  private final ArrPartition<DoubleArray>[] cPartitions;
-  private final Map<Integer, DoubleArray> cenOutMap;
+  protected static final Log LOG = LogFactory.getLog(CenCalcTask.class);
+
+  private final ArrPartition<DoubleArray>[] cenPartitions;
+  private final int numCentroids;
+  private final int numCenPartitions;
   private final int vectorSize;
+  private final ResourcePool resourcePool;
+  private final KMeansCollectiveMapper.Context context;
+  private final AtomicLong appKernelTime;
 
-  public CenCalcTask(ArrPartition<DoubleArray>[] partitions,
-    Map<Integer, DoubleArray> cenData, int size) {
-    this.cPartitions = partitions;
-    this.cenOutMap = new ConcurrentHashMap<Integer, DoubleArray>(cenData);
-    this.vectorSize = size;
+  private static final ThreadLocal<Map<Integer, DoubleArray>> localCenParMap = new ThreadLocal<Map<Integer, DoubleArray>>() {
+    @Override
+    protected Map<Integer, DoubleArray> initialValue() {
+      return null;
+    }
+  };
+
+  public CenCalcTask(ArrPartition<DoubleArray>[] cenPartitions,
+    int numCentroids, int numCenPartitions, int vectorSize,
+    ResourcePool resourcePool, KMeansCollectiveMapper.Context context,
+    AtomicLong appKernelTime) {
+    this.cenPartitions = cenPartitions;
+    this.numCentroids = numCentroids;
+    this.numCenPartitions = numCenPartitions;
+    this.vectorSize = vectorSize;
+    this.resourcePool = resourcePool;
+    this.context = context;
+    this.appKernelTime = appKernelTime;
   }
 
   @Override
-  public Null run(DoubleArray pData) throws Exception {
-    double[] pArray = pData.getArray();
+  public Map<Integer, DoubleArray> run(DoubleArray pointPartition)
+    throws Exception {
+    // Copy variables to thread local
+    int vectorSize = this.vectorSize;
+    int cenVecSize = vectorSize + 1;
+    // Seems always exist in following iterations
+    // So we just create without release
+    if (localCenParMap.get() == null) {
+      System.out.println("No thread local map.");
+      // Using resource pool has better performance
+      localCenParMap.set(KMeansCollectiveMapper.createCenParMap(numCentroids,
+        numCenPartitions, cenVecSize, resourcePool));
+    }
+    Map<Integer, DoubleArray> cenParMap = localCenParMap.get();
+    double[] points = pointPartition.getArray();
     double distance = 0;
     double minDistance = 0;
-    int[] minCenParIDPos = new int[2];
-    minCenParIDPos[0] = 0;
-    minCenParIDPos[1] = 0;
-    DoubleArray cData = null;
-    double[] cArray = null;
-    for (int i = 0; i < pData.getSize(); i += this.vectorSize) {
-      for (int j = 0; j < cPartitions.length; j++) {
-        cData = cPartitions[j].getArray();
-        cArray = cData.getArray();
-        for (int k = 0; k < cData.getSize(); k += (this.vectorSize + 1)) {
-          // Calculate distance for every two points
-          distance = getEuclideanDist(pArray, cArray, i, k + 1, this.vectorSize);
+    // Change from double to float for app kernel benchmark
+    // float distance = 0;
+    // float minDistance = 0;
+    int minCenParID = 0;
+    int minCenVecStart = 0;
+    double[] centroids = null;
+    int cenSize = 0;
+    // long appKernelStart = 0;
+    // long appKernelEnd = 0;
+    // long localAppKernelTime = 0;
+    int count = 0;
+    for (int i = 0; i < pointPartition.getSize(); i += vectorSize) {
+      // appKernelStart = System.nanoTime();
+      for (int j = 0; j < cenPartitions.length; j++) {
+        // Computation intensive!
+        // Try to make code simple and fast
+        centroids = cenPartitions[j].getArray().getArray();
+        cenSize = cenPartitions[j].getArray().getSize();
+        for (int k = 0; k < cenSize; k += cenVecSize) {
+          distance = getEuclideanDist(points, centroids, i, k, vectorSize);
           if (j == 0 && k == 0) {
             minDistance = distance;
-            minCenParIDPos[0] = j;
-            minCenParIDPos[1] = k;
           } else if (distance < minDistance) {
             minDistance = distance;
-            minCenParIDPos[0] = j;
-            minCenParIDPos[1] = k;
+            minCenParID = j;
+            minCenVecStart = k;
           }
         }
       }
-      addPointToCenDataMap(cenOutMap, minCenParIDPos, pArray, i, vectorSize);
+      // appKernelEnd = System.nanoTime();
+      // localAppKernelTime += (appKernelEnd - appKernelStart);
+      addPointToCenParMap(cenParMap, minCenParID, minCenVecStart, points, i,
+        vectorSize);
+      // For every 100 points, report
+      if (count % 1000 == 0) {
+        context.progress();
+      }
+      count++;
     }
-    return new Null();
+    // appKernelTime.addAndGet(localAppKernelTime);
+    return cenParMap;
   }
 
-  private double getEuclideanDist(double[] pArray, double[] cArray, int pStart,
-    int cStart, int vectorSize) {
-    double sum = 0;
+  // Change from double to float for kernel benchmark
+  // private float getEuclideanDist(double[] points, double[] centroids,
+  // int pStart, int cStart, int vectorSize) {
+  // cStart++;
+  // float sum = 0;
+  // float diff = 0;
+  // for (int i = 0; i < vectorSize; i++) {
+  // diff = (float) points[pStart++] - (float) centroids[cStart++];
+  // sum += (diff * diff);
+  // }
+  // return sum;
+  // }
+
+  private double getEuclideanDist(double[] points, double[] centroids,
+    int pStart, int cStart, int vectorSize) {
+    // In distance calculation, dis = p^2 - 2pc + c^2
+    // then dis / 2 = (p^2)/2 - pc + (c^2)/2
+    // we don't need to calculate (p^2)/2, because it is same
+    // (c^2) /2 is calculated in dot product
+    double sum = centroids[cStart++];
     for (int i = 0; i < vectorSize; i++) {
-      sum = sum + (pArray[pStart + i] - cArray[cStart + i])
-        * (pArray[pStart + i] - cArray[cStart + i]);
+      sum -= points[pStart++] * centroids[cStart++];
     }
     return sum;
   }
 
-  private void addPointToCenDataMap(Map<Integer, DoubleArray> cenOutMap,
-    int[] minCenParIDPos, double[] pArray, int i, int vectorSize) {
-    // Get output array partition
-    double[] cOutArray = cenOutMap.get(minCenParIDPos[0]).getArray();
-    synchronized (cOutArray) {
-      // Count + 1
-      cOutArray[minCenParIDPos[1]] = cOutArray[minCenParIDPos[1]] + 1;
-      // Add the point
-      for (int j = 0; j < vectorSize; j++) {
-        cOutArray[minCenParIDPos[1] + 1 + j] = cOutArray[minCenParIDPos[1] + 1
-          + j]
-          + pArray[i + j];
-      }
+  private void addPointToCenParMap(Map<Integer, DoubleArray> localCenParMap,
+    int minCenParID, int minCenVecStart, double[] points, int pStart,
+    int vectorSize) {
+    double[] centroids = localCenParMap.get(minCenParID).getArray();
+    // Count + 1
+    centroids[minCenVecStart++]++;
+    // Add the point
+    for (int j = 0; j < vectorSize; j++) {
+      centroids[minCenVecStart++] += points[pStart++];
     }
   }
 }

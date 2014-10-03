@@ -90,7 +90,7 @@ public class ChainBcastWorker extends CollCommWorker {
     receiver.start();
     LOG.info("7");
     // Master check if all slaves are ready
-    boolean success = masterBarrier(workers, workerData, resourcePool);
+    boolean success = masterHandshake(workers, workerData, resourcePool);
     LOG.info("Barrier: " + success);
     //-----------------------------------------------------------------
     if (success) {
@@ -180,7 +180,7 @@ public class ChainBcastWorker extends CollCommWorker {
       if (withMetaData) {
         int[] metaData = new int[1];
         metaData[0] = 1;
-        byteArray.setMetaData(metaData);
+        byteArray.setMetaArray(metaData);
       }
       LOG.info("Byte array data generation time: "
         + (System.currentTimeMillis() - a));
@@ -325,7 +325,7 @@ public class ChainBcastWorker extends CollCommWorker {
       LOG.info("Receive byte array with size: " + recvByteArray.getSize()
         + " First element: " + recvByteArray.getArray()[0] + " Last element: "
         + recvByteArray.getArray()[recvByteArray.getSize() - 1]);
-      int[] metaData = recvByteArray.getMetaData();
+      int[] metaData = recvByteArray.getMetaArray();
       if (metaData != null) {
         LOG.info("metaData size: " + metaData.length + ",metaData value: "
           + metaData[0]);
@@ -334,6 +334,8 @@ public class ChainBcastWorker extends CollCommWorker {
       }
       resourcePool.getByteArrayPool().releaseArrayInUse(
         recvByteArray.getArray());
+      resourcePool.getIntArrayPool().releaseArrayInUse(
+        recvByteArray.getMetaArray());
     } else if ((sendData instanceof IntArray) && (recvData instanceof IntArray)) {
       IntArray recvIntArray = (IntArray) recvData;
       LOG.info("Receive int array with size: " + recvIntArray.getSize());
@@ -430,6 +432,8 @@ public class ChainBcastWorker extends CollCommWorker {
       ByteArray byteArray = (ByteArray) recvData;
       LOG.info("Receive byte array with size: " + byteArray.getSize());
       resourcePool.getByteArrayPool().releaseArrayInUse(byteArray.getArray());
+      resourcePool.getIntArrayPool()
+        .releaseArrayInUse(byteArray.getMetaArray());
     } else if ((sendData instanceof IntArray) && (recvData instanceof IntArray)) {
       IntArray intArray = (IntArray) recvData;
       LOG.info("Receive int array with size: " + intArray.getSize());

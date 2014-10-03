@@ -59,6 +59,7 @@ public class StructTableBcastSlave<P extends StructPartition, T extends StructTa
       return true;
     }
     ObjectArrayList<ByteArray> recvBinPartitions = new ObjectArrayList<ByteArray>();
+    ObjectArrayList<Commutable> skippedCommData = new ObjectArrayList<Commutable>();
     // Get other partitions from other workers
     for (int i = 0; i < this.totalPartitions; i++) {
       // Wait if data arrives
@@ -66,6 +67,12 @@ public class StructTableBcastSlave<P extends StructPartition, T extends StructTa
         .waitAndGetCommData(Constants.DATA_MAX_WAIT_TIME);
       if (data == null) {
         return false;
+      }
+      // Skip unnecessary data
+      if (!(data instanceof ByteArray)) {
+        skippedCommData.add(data);
+        i--;
+        continue;
       }
       // Get the byte array
       ByteArray byteArray = (ByteArray) data;

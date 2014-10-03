@@ -41,12 +41,13 @@ public abstract class StructTable<P extends StructPartition> {
   }
 
   /**
+   * Add a struct partition into a struct table
    * 
    * @param partition
    * @return 0: cannot add, 1: add, no merge 3, add and merge
    */
   public int addPartition(P partition) {
-    if(!checkAddPartition(partition)) {
+    if (!checkAddPartition(partition)) {
       return 0;
     }
     int partitionID = partition.getPartitionID();

@@ -18,30 +18,30 @@ package edu.iu.harp.graph.vtx;
 
 import org.apache.log4j.Logger;
 
-import edu.iu.harp.util.Long2ObjectOpenHashMap;
+import edu.iu.harp.util.Long2ObjectReuseHashMap;
 
 /**
  * This vertex table is for pagerank value
  * 
  * @author zhangbj
  */
-public class LongDblArrVtxTable extends
-  StructTable<LongDblArrVtxPartition> {
-  
+public class LongDblArrVtxTable extends StructTable<LongDblArrVtxPartition> {
+
   /** Class logger */
   private static final Logger LOG = Logger.getLogger(LongDblArrVtxTable.class);
-  
+
   protected int maxNumPartitions;
   protected int parExpSize;
   protected int arrLen;
 
-  public LongDblArrVtxTable(int tableID, int maxNumPartitions, int parExpSize, int arrLen) {
+  public LongDblArrVtxTable(int tableID, int maxNumPartitions, int parExpSize,
+    int arrLen) {
     super(tableID);
     this.maxNumPartitions = maxNumPartitions;
     this.parExpSize = parExpSize;
     this.arrLen = arrLen;
   }
-  
+
   public int getArrLen() {
     return this.arrLen;
   }
@@ -51,7 +51,7 @@ public class LongDblArrVtxTable extends
       .size()];
     return this.partitions.values().toArray(parArray);
   }
-  
+
   public boolean initVertexVal(long vertexID, double[] vertexVal) {
     LongDblArrVtxPartition partition = getOrCreatePartition(vertexID);
     return partition.initVertexVal(vertexID, vertexVal);
@@ -86,7 +86,7 @@ public class LongDblArrVtxTable extends
     }
     return partition;
   }
-  
+
   public LongDblArrVtxPartition getPartition(long vertexID) {
     int partitionID = getVertexPartitionID(vertexID);
     LongDblArrVtxPartition partition = this.partitions.get(partitionID);
@@ -112,8 +112,9 @@ public class LongDblArrVtxTable extends
   @Override
   protected void mergePartition(LongDblArrVtxPartition op,
     LongDblArrVtxPartition np) {
-    Long2ObjectOpenHashMap<double[]> nMap = np.getVertexMap();
-    for (Long2ObjectOpenHashMap.Entry<double[]> entry : nMap.long2ObjectEntrySet()) {
+    Long2ObjectReuseHashMap<double[]> nMap = np.getVertexMap();
+    for (Long2ObjectReuseHashMap.Entry<double[]> entry : nMap
+      .long2ObjectEntrySet()) {
       op.addVertexVal(entry.getLongKey(), entry.getValue());
     }
   }

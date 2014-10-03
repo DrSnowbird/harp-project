@@ -55,55 +55,89 @@ public class MultiStructParCatcher<P extends StructPartition, T extends StructTa
   }
 
   public boolean waitAndGet() {
-    // Send the partitions owned by this worker in one request
-    long time1 = System.currentTimeMillis();
-    P[] ownedPartitions = this.table.getPartitions();
-    if (this.workers.getSelfID() != this.workers.getNextID()) {
-      deliverVtxPartition(workers, new MultiStructPartition<P>(
-        new ObjectArrayList<P>(ownedPartitions), pool), pool);
+    // Return success if there is only one worker.
+    if (workers.getNumWorkers() <= 1) {
+      return true;
     }
-    long time2 = System.currentTimeMillis();
-    LOG.info("Send owned partitions: " + (time2 - time1));
-    ObjectArrayList<ByteArray> recvBinPartitions = new ObjectArrayList<ByteArray>();
+    // Send the partitions owned by this worker in one request
+    int numWorkers = workers.getNumWorkers();
+    int workerID = workers.getSelfID();
+    int nextWorkerID = workers.getNextID();
+    String nextHost = workers.getNextInfo().getNode();
+    int nextPort = workers.getNextInfo().getPort();
+    int tableID = table.getTableID();
+    P[] ownedPartitions = table.getPartitions();
+    int numOwnedPartitions = ownedPartitions.length;
+    if (numOwnedPartitions > 0) {
+      MultiStructPartition multiStructPartition = (MultiStructPartition) pool
+        .getWritableObjectPool().getWritableObject(
+          MultiStructPartition.class.getName());
+      multiStructPartition.setPartitions(ownedPartitions);
+      multiStructPartition.setResourcePool(pool);
+      deliverVtxPartition(workerID, nextHost, nextPort, tableID,
+        multiStructPartition, pool);
+      // Clean and release
+      multiStructPartition.clean();
+      pool.getWritableObjectPool().releaseWritableObjectInUse(
+        multiStructPartition);
+    }
+    ObjectArrayList<ByteArray> recvBinPartitions = new ObjectArrayList<ByteArray>(
+      numWorkers - 1);
+    ObjectArrayList<Commutable> skippedCommData = new ObjectArrayList<Commutable>();
     // Get other partitions from other workers
-    for (int i = ownedPartitions.length; i < this.totalPartitions;) {
-      long time3 = System.currentTimeMillis();
+    Commutable data = null;
+    ByteArray byteArray = null;
+    int[] metaArray = null;
+    int recvWorkerID = 0;
+    int recvTableID = 0;
+    int recvNumPartitions = 0;
+    for (int i = numOwnedPartitions; i < totalPartitions;) {
       // Wait if data arrives
-      Commutable data = this.workerData
-        .waitAndGetCommData(Constants.DATA_MAX_WAIT_TIME);
+      data = this.workerData.waitAndGetCommData(Constants.DATA_MAX_WAIT_TIME);
       if (data == null) {
         return false;
       }
       // Get the byte array, each contains multiple partitions
-      ByteArray byteArray = (ByteArray) data;
-      int[] metaData = byteArray.getMetaData();
-      int workerID = metaData[0];
-      int partitionCount = metaData[1];
+      if (!(data instanceof ByteArray)) {
+        skippedCommData.add(data);
+        continue;
+      }
+      // Get the byte array
+      byteArray = (ByteArray) data;
+      metaArray = byteArray.getMetaArray();
+      recvWorkerID = metaArray[0];
+      recvTableID = metaArray[1];
+      // If this is not for this table
+      if (recvTableID != tableID) {
+        skippedCommData.add(data);
+        continue;
+      }
+      // Some collective communication on table only has worker and table info
+      recvNumPartitions = metaArray[2];
+      i += recvNumPartitions;
       // Continue sending to your next neighbor
-      if (workerID != this.workers.getNextID()) {
-        ByteArrReqSender byteArraySender = new ByteArrReqSender(workers
-          .getNextInfo().getNode(), workers.getNextInfo().getPort(), byteArray,
-          pool);
+      if (recvWorkerID != nextWorkerID) {
+        ByteArrReqSender byteArraySender = new ByteArrReqSender(nextHost,
+          nextPort, byteArray, pool);
         byteArraySender.execute();
       }
       recvBinPartitions.add(byteArray);
-      i = i + partitionCount;
-      long time4 = System.currentTimeMillis();
-      LOG.info("Wait, Get and Send partitions: " + (time4 - time3));
+    }
+    if (!skippedCommData.isEmpty()) {
+      workerData.putAllCommData(skippedCommData);
     }
     // If more partitions are received
-    LOG.info("recvBinPartitions size: " + recvBinPartitions.size());
+    // LOG.info("recvBinPartitions size: " + recvBinPartitions.size());
     if (recvBinPartitions.size() > 0) {
-      long time5 = System.currentTimeMillis();
-      List<MultiStructPartition<P>> partitions = CollCommWorker.doTasks(
+      List<MultiStructPartition> partitions = CollCommWorker.doTasks(
         recvBinPartitions, "allgather-deserialize-executor",
-        new MultiStructParDeserialTask<P>(pool), numThreads);
-      long time6 = System.currentTimeMillis();
-      for (MultiStructPartition<P> multiPartitions : partitions) {
-        for (P partition : multiPartitions.getPartitionList()) {
+        new MultiStructParDeserialTask(pool), numThreads);
+      for (MultiStructPartition multiPartitions : partitions) {
+        for (StructPartition partition : multiPartitions.getPartitions()) {
           try {
-            // Fail to add or merge happens
-            if (this.table.addPartition(partition) != 1) {
+            // !=1 means succeed to add or merge happens
+            // try to convert partition to P
+            if (this.table.addPartition((P) partition) != 1) {
               this.pool.getWritableObjectPool().releaseWritableObjectInUse(
                 partition);
             }
@@ -112,13 +146,11 @@ public class MultiStructParCatcher<P extends StructPartition, T extends StructTa
             return false;
           }
         }
-        // Free multipartition object
-        this.pool.getWritableObjectPool().freeWritableObjectInUse(
-          multiPartitions);
+        // Release multi-struct-partition object
+        multiPartitions.clean();
+        pool.getWritableObjectPool()
+          .releaseWritableObjectInUse(multiPartitions);
       }
-      long time7 = System.currentTimeMillis();
-      LOG.info("Deserialize Data Time: " + (time6 - time5) + " "
-        + (time7 - time6));
     }
     return true;
   }
@@ -127,10 +159,10 @@ public class MultiStructParCatcher<P extends StructPartition, T extends StructTa
     return this.table;
   }
 
-  private void deliverVtxPartition(Workers workers,
-    MultiStructPartition<P> multiPartition, ResourcePool resourcePool) {
-    MultiStructParDeliver<P> deliver = new MultiStructParDeliver<P>(workers,
-      resourcePool, multiPartition);
+  private void deliverVtxPartition(int workerID, String nextHost, int nextPort,
+    int tableID, MultiStructPartition multiPartition, ResourcePool resourcePool) {
+    MultiStructParDeliver<P> deliver = new MultiStructParDeliver<P>(workerID,
+      nextHost, nextPort, tableID, multiPartition, resourcePool);
     deliver.execute();
   }
 }

@@ -17,6 +17,7 @@
 package edu.iu.harp.comm.client;
 
 import java.io.DataOutputStream;
+import java.io.OutputStream;
 
 import org.apache.commons.io.output.ByteArrayOutputStream;
 import org.apache.log4j.Logger;
@@ -26,12 +27,13 @@ import edu.iu.harp.comm.Constants;
 import edu.iu.harp.comm.data.ByteArrayStream;
 import edu.iu.harp.comm.data.Commutable;
 import edu.iu.harp.comm.data.WritableObject;
+import edu.iu.harp.comm.resource.DataSerializer;
 import edu.iu.harp.comm.resource.ResourcePool;
 
 /**
- * Currently we build the logic based on the simple logic. No fault tolerance is
- * considered.
- * 
+ * This writable object request sender uses ByteArrayOutputStream. Because all
+ * objects we use now are known in size. This class can be considered as
+ * deprecated.
  */
 public class WritableObjReqSender extends ReqSender {
   /** Class logger */
@@ -67,7 +69,7 @@ public class WritableObjReqSender extends ReqSender {
     stream.setByteArrayStream(byteOut);
     return stream;
   }
-  
+
   @Override
   protected void releaseProcessedData(Commutable data) {
     ByteArrayStream stream = (ByteArrayStream) data;
@@ -84,12 +86,16 @@ public class WritableObjReqSender extends ReqSender {
     ByteArrayStream stream = (ByteArrayStream) data;
     ByteArrayOutputStream byteOut = stream.getByteArrayStream();
     int size = byteOut.size();
-    DataOutputStream dout = conn.getDataOutputStream();
-    dout.writeByte(this.getCommand());
-    dout.writeInt(size);
-    dout.writeInt(0); // No meta data
-    dout.flush();
-    byteOut.writeTo(dout);
-    dout.flush();
+    OutputStream out = conn.getOutputStream();
+    out.write(this.getCommand());
+    byte[] sizeBytes = this.getResourcePool().getByteArrayPool().getArray(8);
+    DataSerializer serializer = new DataSerializer(sizeBytes);
+    serializer.writeInt(size);
+    serializer.writeInt(0); // No meta data
+    out.write(sizeBytes);
+    this.getResourcePool().getByteArrayPool().releaseArrayInUse(sizeBytes);
+    out.flush();
+    byteOut.writeTo(out);
+    out.flush();
   }
 }
