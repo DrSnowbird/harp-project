@@ -61,14 +61,14 @@ hadoop-2.2.0
 4. Edit mapred-site.xml in hadoop-2.2.0/etc/hadoop, add memory settings for map tasks in map-collecitve jobs
    (you can change to other numbers you want).
    
-  <property>
-    <name>mapreduce.map.collective.memory.mb</name>
-    <value>9000</value>
-  </property>
-  <property>
-    <name>mapreduce.map.collective.java.memory.mb</name>
-    <value>8000</value>
-  </property>
+ <property>
+   <name>mapreduce.map.collective.memory.mb</name>
+   <value>10000</value>
+ </property>
+ <property>
+   <name>mapreduce.map.collective.java.opts</name>
+   <value>-Xmx8192m -Xms8192m -XX:NewRatio=1 -XX:SurvivorRatio=18</value>
+ </property>
 
 5. for harp applications development in hadoop-2.2.0, remember to add the following property in job configuration:
    jobConf.set("mapreduce.framework.name", "map-collective");
