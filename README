@@ -56,7 +56,7 @@ hadoop-1.2.1
 
 hadoop-2.2.0
 1. Enter "harp" home directory and execute "ant yarndist"
-2. Copy harp-0.1.0-hadoop-2.2.0.jar and fastutil-6.5.7.jar from lib/ into hadoop-2.2.0/share/hadoop/mapreduce.
+2. Copy harp-0.1.0-hadoop-2.2.0.jar and fastutil-6.5.15.jar from lib/ into hadoop-2.2.0/share/hadoop/mapreduce.
 3. Configure Hadoop environment for settings required to run Hadoop.
 4. Edit mapred-site.xml in hadoop-2.2.0/etc/hadoop, add memory settings for map tasks in map-collecitve jobs
    (you can change to other numbers you want).
