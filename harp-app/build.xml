@@ -2,7 +2,7 @@
   <property name="build" location="build"/>
   <property name="lib" location="lib"/>
   <property name="env.HADOOP_HOME" value="/home/zhangbj/hadoop-1.2.1"/>
-  <property name="env.YARN_HOME" value="/home/zhangbj/hadoop-2.2.0"/>
+  <property name="env.YARN_HOME" value="/home/zhangbj/Softwares/hadoop-2.2.0"/>
 
   <path id="class.path">
     <fileset dir="lib">
