@@ -77,4 +77,4 @@ hadoop-2.2.0
 8. Start Hadoop environment.
 9. Run Kmeans job 
    bin/hadoop jar harp-app-hadoop-2.2.0.jar edu.iu.kmeans.KMeansMapCollective <num Of DataPoints> <num of Centroids> <vector size> <number of map tasks> <partition per worker> <number of iteration> <iteration per job> <start Job ID> <work dir> <local points dir>
-  e.g. bin/hadoop jar harp-app-hadoop-2.2.0.jar edu.iu.kmeans.KMeansMapCollective 1000000 2000 3 16 8 3 3 0 kmeans /tmp/km_tmp/
+  e.g. bin/hadoop jar harp-app-hadoop-2.2.0.jar edu.iu.kmeans.KMeansMapCollective 1000000 2000 3 2 8 3 3 0 kmeans /tmp/km_tmp/
